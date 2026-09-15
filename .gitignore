@@ -1,0 +1,8 @@
+/build/
+/dist/
+/.test-output/
+*.obj
+*.pdb
+*.exe
+state.json
+last-error.txt
