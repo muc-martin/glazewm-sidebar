@@ -22,12 +22,17 @@ does not replace Zebar's general widget platform, tray widgets or media controls
 
 ## Install
 
+The installer automatically updates the supported GlazeWM configuration and
+replaces a running Zebar. Read the changes below before running it; this version
+does not yet offer a configuration preview or an integration opt-out.
+
 1. Install GlazeWM and run it once to create its configuration.
 2. Extract the `native-sidebar-0.1.0-windows-x64.zip` package into a temporary folder.
 3. Double-click **Install.cmd**. No administrator rights are needed.
 
 Installation copies the app into `%LOCALAPPDATA%\Programs\NativeSidebar`,
-creates Windows Startup and Start menu shortcuts and starts the new bar. The one-shot startup
+creates Windows Startup and Start menu shortcuts, registers **Native Sidebar** in
+**Settings > Apps > Installed apps**, and starts the new bar. The one-shot startup
 script starts GlazeWM if necessary, then the sidebar, and exits. The sidebar
 reconnects if the window manager is not ready yet.
 
@@ -120,13 +125,18 @@ re-registers the tray icon. Windows may initially put the icon in its overflow a
 
 ## Uninstall or update
 
-Run **Uninstall.ps1** from the installation directory:
+Choose **Native Sidebar > Uninstall** in Windows **Installed apps**.
+If your GlazeWM configuration has since changed, the uninstaller explains the
+conflict and retains the installation instead of overwriting your edits.
+
+Alternatively, run **Uninstall.ps1** from the installation directory:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\NativeSidebar\Uninstall.ps1"
 ```
 
-This removes its Startup and Start menu shortcuts, stops the installed sidebar, restores the
+This removes its Startup and Start menu shortcuts and Windows Apps registration,
+stops the installed sidebar, restores the
 original GlazeWM config and starts Zebar when it was previously configured and
 can be found on PATH. The installation files and backup remain for recovery.
 If the GlazeWM config has changed since installation, uninstall stops before

@@ -7,6 +7,8 @@ $target=Join-Path $root 'installed app'
 $startup=Join-Path $root 'startup'
 $startMenu=Join-Path $root 'start-menu'
 $config=Join-Path $root 'config.yaml'
+$registration='HKCU:\Software\NativeSidebar.Tests\'+[guid]::NewGuid().ToString('N')
+try {
 New-Item -ItemType Directory -Path $package,$startup -Force | Out-Null
 Copy-Item $Binary (Join-Path $package 'native-sidebar.exe')
 Copy-Item (Join-Path $repo 'packaging\*') $package
@@ -53,11 +55,16 @@ $unknown=$original.Replace("  - name: '2'","  - name: 'has spaces'")
 $rejected=$false;try{Get-WorkspaceNames $unknown | Out-Null}catch{$rejected=$true}
 Assert $rejected 'Ambiguous workspace name accepted'
 [IO.File]::WriteAllText($config,$original)
-$args=@{InstallDirectory=$target;ConfigPath=$config;GlazeExe=$Binary;StartupDirectory=$startup;StartMenuDirectory=$startMenu;NoLaunch=$true}
+$args=@{InstallDirectory=$target;ConfigPath=$config;GlazeExe=$Binary;StartupDirectory=$startup;StartMenuDirectory=$startMenu;RegistrationPath=$registration;NoLaunch=$true}
 & (Join-Path $package 'Install.ps1') @args
 Assert (([IO.File]::ReadAllText($config)) -eq $changed) 'Installed configuration incorrect'
 Assert (Test-Path (Join-Path $startup 'Native Sidebar.lnk')) 'Startup shortcut missing'
 Assert (Test-Path (Join-Path $startMenu 'Native Sidebar.lnk')) 'Start menu shortcut missing'
+$registered=Get-ItemProperty -LiteralPath $registration
+Assert ($registered.DisplayName -eq 'Native Sidebar') 'Apps entry missing'
+Assert ($registered.InstallLocation -eq $target) 'Apps installation location wrong'
+Assert ($registered.UninstallString.Contains('installed app\Uninstall.cmd""')) 'Uninstall path with spaces broken'
+Assert ($registered.NoModify -eq 1 -and $registered.NoRepair -eq 1) 'Unsupported maintenance actions enabled'
 $shell=New-Object -ComObject WScript.Shell
 $link=$shell.CreateShortcut((Join-Path $startup 'Native Sidebar.lnk'))
 Assert ($link.Arguments.Contains('installed app\Start-Sidebar.ps1"')) 'Shortcut path with spaces broken'
@@ -75,11 +82,13 @@ $link.Save()
 $rejected=$false;try{& (Join-Path $target 'Uninstall.ps1') -NoLaunch}catch{$rejected=$true}
 Assert $rejected 'Uninstall overwrote later edits'
 Assert (Test-Path (Join-Path $startup 'Native Sidebar.lnk')) 'Rejected uninstall removed startup'
+Assert (Test-Path -LiteralPath $registration) 'Rejected uninstall removed Apps entry'
 [IO.File]::WriteAllText($config,$changed)
 & (Join-Path $target 'Uninstall.ps1') -NoLaunch
 Assert (([IO.File]::ReadAllText($config)) -eq $original) 'Uninstall did not restore exact original'
 Assert (!(Test-Path (Join-Path $startup 'Native Sidebar.lnk'))) 'Startup shortcut retained after uninstall'
 Assert (!(Test-Path (Join-Path $startMenu 'Native Sidebar.lnk'))) 'Start menu shortcut retained after uninstall'
+Assert (!(Test-Path -LiteralPath $registration)) 'Apps entry retained after uninstall'
 Assert (Test-Path (Join-Path $target 'original-config.yaml')) 'Recovery backup deleted'
 & (Join-Path $target 'Uninstall.ps1') -NoLaunch
 & (Join-Path $package 'Install.ps1') @args
@@ -90,8 +99,12 @@ $notDirectory=Join-Path $root 'startup-is-a-file'
 [IO.File]::WriteAllText($notDirectory,'fixture')
 [IO.File]::WriteAllText($config,$original)
 $rejected=$false
-try{& (Join-Path $package 'Install.ps1') -InstallDirectory $failedTarget -ConfigPath $config -GlazeExe $Binary -StartupDirectory $notDirectory -StartMenuDirectory $startMenu -NoLaunch}catch{$rejected=$true}
+try{& (Join-Path $package 'Install.ps1') -InstallDirectory $failedTarget -ConfigPath $config -GlazeExe $Binary -StartupDirectory $notDirectory -StartMenuDirectory $startMenu -RegistrationPath $registration -NoLaunch}catch{$rejected=$true}
 Assert $rejected 'Simulated startup failure did not abort'
 Assert (([IO.File]::ReadAllText($config)) -eq $original) 'Failed installation did not roll back configuration'
 Assert (!(Test-Path $failedTarget)) 'Failed installation remained active'
+Assert (!(Test-Path -LiteralPath $registration)) 'Failed install left an Apps entry'
 'PASS: configuration transform, inline/block lists, idempotence, fail-closed validation, install, paths with spaces, startup, update, edit conflict and uninstall.'
+} finally {
+    if(Test-Path -LiteralPath $registration){Remove-Item -LiteralPath $registration -Force}
+}

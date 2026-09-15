@@ -2,6 +2,7 @@
 
 ## 0.1.0 — unreleased
 
+- Windows Installed apps registration with an uninstall command and rollback tests.
 - Clock/date anchored at the bottom; battery percentage inside a compact battery icon.
 - Optional half-circle Windows theme toggle and CPU/RAM/battery percentages.
 - Native five-second CPU/RAM sampling, minute/power-event battery updates;

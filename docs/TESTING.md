@@ -9,6 +9,8 @@
 - Installation into a path containing spaces, startup shortcut and workspace import.
 - Update preserving the first original backup.
 - Uninstall refusing to overwrite user edits, then restoring exact original content.
+- Windows Apps registration, uninstall command quoting, update preservation and
+  rollback cleanup, using temporary `HKCU\Software\NativeSidebar.Tests` keys.
 
 Temporary fixtures are retained under `.test-output/` for inspection and ignored
 by Git. No live GlazeWM configuration is used in these tests.
