@@ -75,4 +75,13 @@ Assert (Test-Path (Join-Path $target 'original-config.yaml')) 'Recovery backup d
 & (Join-Path $package 'Install.ps1') @args
 Assert (Test-Path (Join-Path $startup 'Native Sidebar.lnk')) 'Reinstall failed'
 & (Join-Path $target 'Uninstall.ps1') -NoLaunch
+$failedTarget=Join-Path $root 'failed-install'
+$notDirectory=Join-Path $root 'startup-is-a-file'
+[IO.File]::WriteAllText($notDirectory,'fixture')
+[IO.File]::WriteAllText($config,$original)
+$rejected=$false
+try{& (Join-Path $package 'Install.ps1') -InstallDirectory $failedTarget -ConfigPath $config -GlazeExe $Binary -StartupDirectory $notDirectory -NoLaunch}catch{$rejected=$true}
+Assert $rejected 'Simulated startup failure did not abort'
+Assert (([IO.File]::ReadAllText($config)) -eq $original) 'Failed installation did not roll back configuration'
+Assert (!(Test-Path $failedTarget)) 'Failed installation remained active'
 'PASS: configuration transform, inline/block lists, idempotence, fail-closed validation, install, paths with spaces, startup, update, edit conflict and uninstall.'

@@ -19,6 +19,7 @@ if(!(Test-Path -LiteralPath $payload)){throw 'Run Install.cmd from the extracted
 if($InstallDirectory.TrimEnd('\') -eq $PSScriptRoot.TrimEnd('\')){throw 'Extract the installer outside the installation directory.'}
 $marker=Join-Path $InstallDirectory 'installation.json'
 $shortcut=Join-Path $StartupDirectory 'Native Sidebar.lnk'
+$hadShortcut=Test-Path -LiteralPath $shortcut
 $before=[IO.File]::ReadAllText($ConfigPath)
 $previous=$null
 if(Test-Path -LiteralPath $InstallDirectory){
@@ -44,7 +45,8 @@ $record | ConvertTo-Json | Set-Content (Join-Path $stage 'installation.json') -E
 $archive=$null
 try {
     if($previous){
-        Get-Process native-sidebar -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq (Join-Path $InstallDirectory 'native-sidebar.exe')} | Stop-Process
+        $running=@(Get-Process native-sidebar -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq (Join-Path $InstallDirectory 'native-sidebar.exe')})
+        foreach($process in $running){Stop-Process -Id $process.Id;$process.WaitForExit()}
         $archive=$InstallDirectory+'.previous-'+[guid]::NewGuid().ToString('N')
         # Both absolute paths are explicit siblings under the installation parent.
         Move-Item -LiteralPath $InstallDirectory -Destination $archive
@@ -63,15 +65,20 @@ try {
             if(!$response.success){throw "GlazeWM rejected configuration: $($response.error)"}
         }
         # Replace the bar, not the window manager. No application windows are closed.
-        Get-Process zebar,native-sidebar -ErrorAction SilentlyContinue | Stop-Process
+        $running=@(Get-Process zebar,native-sidebar -ErrorAction SilentlyContinue)
+        foreach($process in $running){Stop-Process -Id $process.Id;$process.WaitForExit()}
         & (Join-Path $InstallDirectory 'Start-Sidebar.ps1')
     }
 } catch {
     [IO.File]::WriteAllText($ConfigPath,$before,[Text.UTF8Encoding]::new($false))
-    if(!$previous -and (Test-Path -LiteralPath $shortcut)){Remove-Item -LiteralPath $shortcut}
+    if(!$hadShortcut -and (Test-Path -LiteralPath $shortcut)){Remove-Item -LiteralPath $shortcut}
     if(Test-Path -LiteralPath $InstallDirectory){Move-Item -LiteralPath $InstallDirectory -Destination ($InstallDirectory+'.failed-'+[guid]::NewGuid().ToString('N'))}
     if($archive){Move-Item -LiteralPath $archive -Destination $InstallDirectory}
     if(!$NoLaunch -and (Get-Process glazewm -ErrorAction SilentlyContinue)){& $GlazeExe command wm-reload-config | Out-Null}
+    if(!$NoLaunch){
+        if($previous -and $previous.Active -and (Test-Path -LiteralPath (Join-Path $InstallDirectory 'Start-Sidebar.ps1'))){& (Join-Path $InstallDirectory 'Start-Sidebar.ps1')}
+        elseif($before -match '(?i)zebar'){$oldBar=Get-Command zebar.exe -ErrorAction SilentlyContinue;if($oldBar){Start-Process $oldBar.Source -WindowStyle Hidden}}
+    }
     throw
 }
 Write-Output "Installed Native Sidebar in $InstallDirectory"
