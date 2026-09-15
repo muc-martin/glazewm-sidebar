@@ -1,7 +1,10 @@
 # Native Sidebar for GlazeWM
 
-A vertical workspace bar for Windows, written in C++ with Win32. It runs as a
-single native process and connects directly to GlazeWM.
+A vertical workspace bar for GlazeWM built to keep RAM usage low.
+
+I built it to replace my Zebar setup, with reducing memory usage as the main goal.
+It uses C++ and Win32, runs as a single native process and connects directly to
+GlazeWM. There is no embedded browser or WebView runtime.
 
 Click a workspace to switch to it. The clock and date sit at the bottom, with
 optional CPU, RAM, battery and Windows theme controls above them.
