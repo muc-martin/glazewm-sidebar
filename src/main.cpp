@@ -32,7 +32,8 @@ struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
   int dpi = 96, hover = -1;
-  HFONT font = nullptr, smallFont = nullptr, clockFont = nullptr;
+  HFONT font = nullptr, smallFont = nullptr, clockFont = nullptr,
+        batteryFont = nullptr;
 };
 std::vector<Bar *> bars;
 Snapshot currentState, pending;
@@ -350,19 +351,28 @@ void paint(Bar *b, HDC target = nullptr) {
   FillRect(dc, &divider, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
   y = rc.bottom - px(b, widgetHeight() + ClockHeight);
   if (widgets::enabled[widgets::Theme]) {
-    int cx = rc.right / 2, cy = y + px(b, 12), radius = px(b, 6);
-    auto pen = CreatePen(PS_SOLID, 1, RGB(235, 239, 245));
+    int cx = rc.right / 2, cy = y + px(b, 12);
+    auto pen = CreatePen(PS_SOLID, px(b, 1), RGB(224, 232, 242));
     auto oldPen = SelectObject(dc, pen);
     auto oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-    Ellipse(dc, cx - radius, cy - radius, cx + radius + 1, cy + radius + 1);
-    int saved = SaveDC(dc);
-    IntersectClipRect(dc, widgets::light ? cx - radius : cx, cy - radius,
-                      widgets::light ? cx + 1 : cx + radius + 1,
-                      cy + radius + 1);
-    SelectObject(dc, GetStockObject(DC_BRUSH));
-    SetDCBrushColor(dc, RGB(235, 239, 245));
-    Ellipse(dc, cx - radius, cy - radius, cx + radius + 1, cy + radius + 1);
-    RestoreDC(dc, saved);
+    if (!widgets::light) {
+      int radius = px(b, 3);
+      Ellipse(dc, cx - radius, cy - radius, cx + radius + 1, cy + radius + 1);
+      const int rays[][4] = {{0, -6, 0, -8}, {0, 6, 0, 8},     {-6, 0, -8, 0},
+                             {6, 0, 8, 0},   {-4, -4, -6, -6}, {4, -4, 6, -6},
+                             {-4, 4, -6, 6}, {4, 4, 6, 6}};
+      for (const auto &ray : rays) {
+        MoveToEx(dc, cx + px(b, ray[0]), cy + px(b, ray[1]), nullptr);
+        LineTo(dc, cx + px(b, ray[2]), cy + px(b, ray[3]));
+      }
+    } else {
+      SelectObject(dc, GetStockObject(NULL_PEN));
+      SelectObject(dc, GetStockObject(DC_BRUSH));
+      SetDCBrushColor(dc, RGB(224, 232, 242));
+      Ellipse(dc, cx - px(b, 6), cy - px(b, 6), cx + px(b, 7), cy + px(b, 7));
+      SetDCBrushColor(dc, RGB(23, 26, 32));
+      Ellipse(dc, cx - px(b, 2), cy - px(b, 8), cx + px(b, 9), cy + px(b, 3));
+    }
     SelectObject(dc, oldPen);
     SelectObject(dc, oldBrush);
     DeleteObject(pen);
@@ -381,19 +391,19 @@ void paint(Bar *b, HDC target = nullptr) {
     y += px(b, 34);
   }
   if (widgets::enabled[widgets::Battery]) {
-    RECT body = {px(b, 3), y + px(b, 3), rc.right - px(b, 5), y + px(b, 23)};
+    RECT body = {px(b, 5), y + px(b, 4), rc.right - px(b, 7), y + px(b, 22)};
     auto brush = CreateSolidBrush(RGB(57, 65, 76));
     auto oldBrush = SelectObject(dc, brush);
     auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
     RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
               px(b, 8));
-    RECT terminal = {body.right + px(b, 1), body.top + px(b, 5),
-                     body.right + px(b, 3), body.bottom - px(b, 5)};
+    RECT terminal = {body.right + px(b, 1), body.top + px(b, 6),
+                     body.right + px(b, 3), body.bottom - px(b, 6)};
     SetDCBrushColor(dc, RGB(139, 153, 170));
     FillRect(dc, &terminal, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
     auto value =
         widgets::battery < 0 ? L"--" : std::to_wstring(widgets::battery);
-    text(dc, value, body, RGB(229, 235, 243), b->font);
+    text(dc, value, body, RGB(229, 235, 243), b->batteryFont);
     if (widgets::battery > 0) {
       int saved = SaveDC(dc);
       IntersectClipRect(
@@ -405,7 +415,7 @@ void paint(Bar *b, HDC target = nullptr) {
                                                  : RGB(199, 214, 228));
       RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
                 px(b, 8));
-      text(dc, value, body, RGB(23, 26, 32), b->font);
+      text(dc, value, body, RGB(23, 26, 32), b->batteryFont);
       RestoreDC(dc, saved);
     }
     SelectObject(dc, oldPen);
@@ -518,6 +528,10 @@ BOOL CALLBACK addMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM) {
                              FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                              DEFAULT_PITCH, L"Segoe UI Variable Display");
+  b->batteryFont =
+      CreateFontW(-px(b, 14), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
   SetWindowPos(b->hwnd, HWND_TOPMOST, mi.rcWork.left + px(b, 4),
                mi.rcWork.top + px(b, 4), px(b, BarWidth),
                mi.rcWork.bottom - mi.rcWork.top - px(b, 8),
@@ -531,6 +545,7 @@ void rebuild() {
     DeleteObject(b->font);
     DeleteObject(b->smallFont);
     DeleteObject(b->clockFont);
+    DeleteObject(b->batteryFont);
     delete b;
   }
   bars.clear();

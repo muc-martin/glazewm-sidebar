@@ -2,7 +2,7 @@
 
 A 40-pixel vertical Windows sidebar showing workspaces, time and date, with
 optional Windows theme, CPU, RAM and battery widgets. Click a workspace to
-switch, or the half-circle to toggle Windows light/dark mode. There are no scroll
+switch, or the sun/moon icon to toggle Windows light/dark mode. There are no scroll
 switching, modifier gestures, sidebar context menus or window-moving actions.
 
 Written in C++ using Win32/GDI and the Windows WebSocket client. No browser,
@@ -75,8 +75,8 @@ buttons and the theme button; the rest uses the standard arrow.
 The notification-area menu enables each widget independently. All four are on by
 default; selections are saved in the installation's `sidebar.ini` and survive updates.
 
-- **Half-circle:** click to toggle Windows app and system light/dark preferences.
-  The filled half changes sides to reflect the app preference. The sidebar palette
+- **Sun/moon:** click to toggle Windows app and system light/dark preferences.
+  The sun offers light mode; the moon offers dark mode. The sidebar palette
   stays fixed. Apps with their own theme setting may need to follow the system;
   a separate theme scheduler may later override a manual change.
 - **CPU:** percentage of busy processor time averaged over the last five seconds.
@@ -84,7 +84,7 @@ default; selections are saved in the installation's `sidebar.ini` and survive up
   On systems with more than 64 logical processors, `GetSystemTimes` covers the
   calling thread's processor group.
 - **RAM:** percentage of physical memory in use, refreshed every five seconds.
-- **Battery symbol:** battery charge percentage inside the icon, refreshed every minute and on Windows power
+- **Battery symbol:** battery charge percentage as a bold number inside the compact icon, refreshed every minute and on Windows power
   notifications. `--` means unavailable or no battery; CPU also shows `--` before
   its first complete sampling interval.
 
