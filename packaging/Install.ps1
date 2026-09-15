@@ -4,6 +4,7 @@ param(
     [string]$ConfigPath=$(if($env:GLAZEWM_CONFIG_PATH){$env:GLAZEWM_CONFIG_PATH}else{Join-Path $env:USERPROFILE '.glzr\glazewm\config.yaml'}),
     [string]$GlazeExe,
     [string]$StartupDirectory=[Environment]::GetFolderPath('Startup'),
+    [string]$StartMenuDirectory=[Environment]::GetFolderPath('Programs'),
     [switch]$NoLaunch
 )
 $ErrorActionPreference='Stop'
@@ -19,6 +20,8 @@ if(!(Test-Path -LiteralPath $payload)){throw 'Run Install.cmd from the extracted
 if($InstallDirectory.TrimEnd('\') -eq $PSScriptRoot.TrimEnd('\')){throw 'Extract the installer outside the installation directory.'}
 $marker=Join-Path $InstallDirectory 'installation.json'
 $shortcut=Join-Path $StartupDirectory 'Native Sidebar.lnk'
+$startMenuShortcut=Join-Path $StartMenuDirectory 'Native Sidebar.lnk'
+$hadStartMenu=Test-Path -LiteralPath $startMenuShortcut
 $hadShortcut=Test-Path -LiteralPath $shortcut
 $before=[IO.File]::ReadAllText($ConfigPath)
 $previous=$null
@@ -30,6 +33,7 @@ if(Test-Path -LiteralPath $InstallDirectory){
     if($before -ne [IO.File]::ReadAllText((Join-Path $InstallDirectory $expectedName))){throw 'Configuration changed since installation. Preserve/merge your changes before upgrading.'}
 }
 if((Test-Path -LiteralPath $shortcut) -and !$previous){throw 'A Native Sidebar startup entry already exists without a matching installation.'}
+if($hadStartMenu -and !$previous){throw 'A Native Sidebar Start menu entry already exists without a matching installation.'}
 $after=ConvertTo-SidebarConfiguration $before
 $names=@(Get-WorkspaceNames $before)
 $stage=Join-Path ([IO.Path]::GetDirectoryName($InstallDirectory)) ('NativeSidebar-stage-'+[guid]::NewGuid().ToString('N'))
@@ -40,7 +44,7 @@ foreach($name in $files){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) 
 $original=if($previous){[IO.File]::ReadAllText((Join-Path $InstallDirectory 'original-config.yaml'))}else{$before}
 [IO.File]::WriteAllText((Join-Path $stage 'original-config.yaml'),$original,[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $stage 'installed-config.yaml'),$after,[Text.UTF8Encoding]::new($false))
-$record=[ordered]@{Version='0.1.0';Active=$true;ConfigPath=$ConfigPath;GlazeExe=[IO.Path]::GetFullPath($GlazeExe);Shortcut=$shortcut;InstalledAt=[DateTime]::UtcNow.ToString('o')}
+$record=[ordered]@{Version='0.1.0';Active=$true;ConfigPath=$ConfigPath;GlazeExe=[IO.Path]::GetFullPath($GlazeExe);Shortcut=$shortcut;StartMenuShortcut=$startMenuShortcut;InstalledAt=[DateTime]::UtcNow.ToString('o')}
 $record | ConvertTo-Json | Set-Content (Join-Path $stage 'installation.json') -Encoding UTF8
 $archive=$null
 try {
@@ -58,7 +62,15 @@ try {
     $link=$shell.CreateShortcut($shortcut)
     $link.TargetPath=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $link.Arguments='-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "'+(Join-Path $InstallDirectory 'Start-Sidebar.ps1')+'"'
-    $link.WorkingDirectory=$InstallDirectory;$link.WindowStyle=7;$link.Description='Native Sidebar for GlazeWM';$link.Save()
+    $link.WorkingDirectory=$InstallDirectory;$link.WindowStyle=7;$link.Description='Native Sidebar for GlazeWM'
+    $enableStartup=(!$previous -or !$previous.Active -or $hadShortcut)
+    if($enableStartup){$link.Save()}
+    New-Item -ItemType Directory -Path $StartMenuDirectory -Force | Out-Null
+    $menuLink=$shell.CreateShortcut($startMenuShortcut)
+    $menuLink.TargetPath=$link.TargetPath;$menuLink.Arguments=$link.Arguments
+    $menuLink.WorkingDirectory=$InstallDirectory;$menuLink.WindowStyle=7
+    $menuLink.IconLocation=(Join-Path $InstallDirectory 'native-sidebar.exe')+',0'
+    $menuLink.Description='Native Sidebar starten';$menuLink.Save()
     if(!$NoLaunch){
         if(Get-Process glazewm -ErrorAction SilentlyContinue){
             $response=(& $GlazeExe command wm-reload-config | ConvertFrom-Json)
@@ -72,6 +84,7 @@ try {
 } catch {
     [IO.File]::WriteAllText($ConfigPath,$before,[Text.UTF8Encoding]::new($false))
     if(!$hadShortcut -and (Test-Path -LiteralPath $shortcut)){Remove-Item -LiteralPath $shortcut}
+    if(!$hadStartMenu -and (Test-Path -LiteralPath $startMenuShortcut)){Remove-Item -LiteralPath $startMenuShortcut}
     if(Test-Path -LiteralPath $InstallDirectory){Move-Item -LiteralPath $InstallDirectory -Destination ($InstallDirectory+'.failed-'+[guid]::NewGuid().ToString('N'))}
     if($archive){Move-Item -LiteralPath $archive -Destination $InstallDirectory}
     if(!$NoLaunch -and (Get-Process glazewm -ErrorAction SilentlyContinue)){& $GlazeExe command wm-reload-config | Out-Null}
@@ -82,4 +95,4 @@ try {
     throw
 }
 Write-Output "Installed Native Sidebar in $InstallDirectory"
-Write-Output 'Windows sign-in startup enabled. Original GlazeWM configuration preserved.'
+Write-Output 'Windows startup preference applied. Original GlazeWM configuration preserved.'

@@ -13,6 +13,9 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <winhttp.h>
+#include <shellapi.h>
+#include <objbase.h>
+#include "tray.h"
 using json = nlohmann::json;
 constexpr UINT UPDATE = WM_APP + 1, REBUILD = WM_APP + 2;
 struct Workspace {
@@ -27,7 +30,7 @@ struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
   int dpi = 96, hover = -1;
-  HFONT font = nullptr, small = nullptr;
+  HFONT font = nullptr, smallFont = nullptr;
 };
 std::vector<Bar *> bars;
 Snapshot currentState, pending;
@@ -39,6 +42,7 @@ std::atomic<bool> updateQueued = false;
 std::wstring baseDir;
 std::vector<std::string> configured;
 bool diagnostics = false;
+UINT taskbarCreated = 0;
 int px(Bar *b, int v) { return MulDiv(v, b->dpi, 96); }
 std::wstring wide(const std::string &s) {
   int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
@@ -98,13 +102,8 @@ Snapshot decode(const json &j) {
     v.focused = w.value("hasFocus", false);
     v.displayed = w.value("isDisplayed", false);
     v.occupied = !w.value("children", json::array()).empty();
-    s.workspaces.push_back(v);
-  }
-  // Keep empty configured workspaces accessible with the same single click.
-  for (const auto &name : configured) {
-    if (std::none_of(s.workspaces.begin(), s.workspaces.end(),
-                     [&](const auto &w) { return w.name == name; }))
-      s.workspaces.push_back({name, name, false, false, false});
+    if (v.occupied || v.focused || v.displayed)
+      s.workspaces.push_back(v);
   }
   return s;
 }
@@ -202,10 +201,19 @@ void focusWorkspace(const std::string &name) {
   sendCommand("command focus --workspace " + name);
 }
 int rowAt(Bar *b, int y) {
-  int n = (y - px(b, 8)) / px(b, 32);
+  int n = (y - px(b, 8)) / px(b, 28);
   return y >= px(b, 8) && n >= 0 && n < (int)currentState.workspaces.size()
              ? n
              : -1;
+}
+int hitButton(Bar *b, int x, int y) {
+  RECT rc;
+  GetClientRect(b->hwnd, &rc);
+  int n = rowAt(b, y);
+  if (n < 0 || x < px(b, 3) || x >= rc.right - px(b, 3) ||
+      y >= px(b, 32 + n * 28) || px(b, 32 + n * 28) > rc.bottom - px(b, 146))
+    return -1;
+  return n;
 }
 void text(HDC dc, const std::wstring &s, RECT r, COLORREF color, HFONT font) {
   SelectObject(dc, font);
@@ -219,19 +227,19 @@ void paint(Bar *b) {
   HDC dc = BeginPaint(b->hwnd, &ps);
   RECT rc;
   GetClientRect(b->hwnd, &rc);
-  auto bg = CreateSolidBrush(RGB(23, 26, 32));
+  auto bg = CreateSolidBrush(RGB(66, 73, 84));
   FillRect(dc, &rc, bg);
   DeleteObject(bg);
   SetBkMode(dc, TRANSPARENT);
   for (int i = 0; i < (int)currentState.workspaces.size(); ++i) {
     const auto &w = currentState.workspaces[i];
-    RECT r = {px(b, 3), px(b, 8 + i * 32), rc.right - px(b, 3),
-              px(b, 36 + i * 32)};
+    RECT r = {px(b, 3), px(b, 8 + i * 28), rc.right - px(b, 3),
+              px(b, 32 + i * 28)};
     if (r.bottom > rc.bottom - px(b, 146))
       break;
     if (w.focused || w.displayed || b->hover == i) {
       auto brush =
-          CreateSolidBrush(w.focused ? RGB(73, 91, 112) : RGB(43, 49, 59));
+          CreateSolidBrush(w.focused ? RGB(114, 137, 164) : RGB(83, 93, 107));
       auto old = SelectObject(dc, brush);
       auto pen = SelectObject(dc, GetStockObject(NULL_PEN));
       RoundRect(dc, r.left, r.top, r.right, r.bottom, px(b, 10), px(b, 10));
@@ -240,13 +248,7 @@ void paint(Bar *b) {
       DeleteObject(brush);
     }
     text(dc, wide(w.label), r,
-         w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195), b->font);
-    if (w.occupied && !w.focused) {
-      RECT dot = {px(b, 2), r.top + px(b, 12), px(b, 4), r.top + px(b, 16)};
-      auto br = CreateSolidBrush(RGB(139, 169, 196));
-      FillRect(dc, &dot, br);
-      DeleteObject(br);
-    }
+         w.focused ? RGB(255, 255, 255) : RGB(224, 230, 239), b->font);
   }
   if (!currentState.connected) {
     RECT r = {0, px(b, 8), rc.right, px(b, 36)};
@@ -266,8 +268,8 @@ void paint(Bar *b) {
   const wchar_t *parts[] = {hour, minute, L"", weekday, day, month};
   for (int i = 0; i < 6; i++) {
     RECT r = {0, y + px(b, i * 21), rc.right, y + px(b, (i + 1) * 21)};
-    text(dc, parts[i], r, i < 2 ? RGB(235, 239, 245) : RGB(151, 163, 179),
-         i < 2 ? b->font : b->small);
+    text(dc, parts[i], r, i < 2 ? RGB(235, 239, 245) : RGB(213, 221, 232),
+         i < 2 ? b->font : b->smallFont);
   }
   EndPaint(b->hwnd, &ps);
 }
@@ -293,8 +295,20 @@ LRESULT CALLBACK barProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     return 1;
   case WM_MOUSEACTIVATE:
     return MA_NOACTIVATE;
+  case WM_SETCURSOR:
+    if (LOWORD(l) == HTCLIENT) {
+      POINT p;
+      GetCursorPos(&p);
+      ScreenToClient(h, &p);
+      SetCursor(LoadCursorW(nullptr, currentState.connected &&
+                                             hitButton(b, p.x, p.y) >= 0
+                                         ? IDC_HAND
+                                         : IDC_ARROW));
+      return TRUE;
+    }
+    break;
   case WM_LBUTTONUP: {
-    int i = rowAt(b, GET_Y_LPARAM(l));
+    int i = hitButton(b, GET_X_LPARAM(l), GET_Y_LPARAM(l));
     if (i >= 0)
       focusWorkspace(currentState.workspaces[i].name);
     return 0;
@@ -303,7 +317,7 @@ LRESULT CALLBACK barProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
   case WM_CONTEXTMENU:
     return 0;
   case WM_MOUSEMOVE: {
-    int i = rowAt(b, GET_Y_LPARAM(l));
+    int i = hitButton(b, GET_X_LPARAM(l), GET_Y_LPARAM(l));
     if (i != b->hover) {
       b->hover = i;
       InvalidateRect(h, nullptr, FALSE);
@@ -334,19 +348,19 @@ BOOL CALLBACK addMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM) {
   b->hwnd =
       CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"NativeSidebar",
                       L"Native Sidebar", WS_POPUP, mi.rcWork.left,
-                      mi.rcWork.top, 32, mi.rcWork.bottom - mi.rcWork.top,
+                      mi.rcWork.top, 28, mi.rcWork.bottom - mi.rcWork.top,
                       nullptr, nullptr, GetModuleHandleW(nullptr), b);
   b->dpi = GetDpiForWindow(b->hwnd);
   b->font =
-      CreateFontW(-px(b, 13), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+      CreateFontW(-px(b, 11), 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                   CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
-  b->small =
+  b->smallFont =
       CreateFontW(-px(b, 10), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                   CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
   SetWindowPos(b->hwnd, HWND_TOPMOST, mi.rcWork.left + px(b, 4),
-               mi.rcWork.top + px(b, 4), px(b, 32),
+               mi.rcWork.top + px(b, 4), px(b, 28),
                mi.rcWork.bottom - mi.rcWork.top - px(b, 8),
                SWP_NOACTIVATE | SWP_SHOWWINDOW);
   bars.push_back(b);
@@ -356,7 +370,7 @@ void rebuild() {
   for (auto *b : bars) {
     DestroyWindow(b->hwnd);
     DeleteObject(b->font);
-    DeleteObject(b->small);
+    DeleteObject(b->smallFont);
     delete b;
   }
   bars.clear();
@@ -386,7 +400,29 @@ void CALLBACK foregroundEvent(HWINEVENTHOOK, DWORD, HWND hwnd, LONG object,
     PostMessageW(controller, WM_APP + 3, 0, 0);
 }
 LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+  if (taskbarCreated && msg == taskbarCreated) {
+    tray::restore();
+    return 0;
+  }
   switch (msg) {
+  case tray::Callback:
+    if (LOWORD(l) == WM_CONTEXTMENU || LOWORD(l) == NIN_SELECT ||
+        LOWORD(l) == NIN_KEYSELECT)
+      tray::menu();
+    return 0;
+  case WM_COMMAND:
+    if (LOWORD(w) == tray::Exit)
+      PostMessageW(h, WM_CLOSE, 0, 0);
+    else if (LOWORD(w) == tray::Show) {
+      rebuild();
+      fullscreenVisibility();
+    } else if (LOWORD(w) == tray::Startup) {
+      if (!tray::setStartup(!tray::startupEnabled()))
+        MessageBoxW(
+            h, L"Die Autostart-Verknuepfung konnte nicht aktualisiert werden.",
+            L"Native Sidebar", MB_OK | MB_ICONERROR);
+    }
+    return 0;
   case UPDATE: {
     updateQueued = false;
     {
@@ -439,6 +475,7 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     return 0;
   case WM_CLOSE:
     stopping = true;
+    tray::remove();
     for (auto *b : bars)
       DestroyWindow(b->hwnd);
     DestroyWindow(h);
@@ -450,9 +487,23 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
   return DefWindowProcW(h, msg, w, l);
 }
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
+  if (wcsstr(args, L"--test-workspaces")) {
+    configured = {"1", "2", "3", "9"};
+    const auto result = decode(json::parse(R"({"data":{"workspaces":[
+      {"name":"1","children":[{"type":"window"}]},
+      {"name":"2","children":[],"hasFocus":true},
+      {"name":"3","children":[],"isDisplayed":true},
+      {"name":"4","children":[]}
+    ]}})"));
+    return result.workspaces.size() == 3 && result.workspaces[0].name == "1" &&
+                   result.workspaces[1].name == "2" &&
+                   result.workspaces[2].name == "3"
+               ? 0
+               : 1;
+  }
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-  HANDLE singleton =
-      CreateMutexW(nullptr, FALSE, L"Local\\NativeSidebar");
+  HANDLE singleton = CreateMutexW(nullptr, FALSE, L"Local\\NativeSidebar");
   if (GetLastError() == ERROR_ALREADY_EXISTS)
     return 0;
   wchar_t path[MAX_PATH];
@@ -465,7 +516,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
   wc.hInstance = instance;
   wc.lpfnWndProc = barProc;
   wc.lpszClassName = L"NativeSidebar";
-  wc.hCursor = LoadCursorW(nullptr, IDC_HAND);
+  wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
   RegisterClassW(&wc);
   wc.lpfnWndProc = controlProc;
   wc.lpszClassName = L"NativeSidebarController";
@@ -474,6 +525,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
       CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, wc.lpszClassName,
                       L"Native Sidebar Controller", WS_POPUP, 0, 0, 0, 0,
                       nullptr, nullptr, instance, nullptr);
+  taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+  tray::initialize(controller, baseDir);
   rebuild();
   armClock(controller);
   SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
@@ -490,5 +543,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
     DispatchMessageW(&msg);
   }
   CloseHandle(singleton);
+  CoUninitialize();
   ExitProcess(0);
 }

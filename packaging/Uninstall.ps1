@@ -14,6 +14,9 @@ try {
     }
 }catch{[IO.File]::WriteAllText($record.ConfigPath,$installed,[Text.UTF8Encoding]::new($false));throw}
 if(Test-Path -LiteralPath $record.Shortcut){Remove-Item -LiteralPath $record.Shortcut}
+if($record.PSObject.Properties.Name -contains 'StartMenuShortcut'){
+    if(Test-Path -LiteralPath $record.StartMenuShortcut){Remove-Item -LiteralPath $record.StartMenuShortcut}
+}
 $record.Active=$false
 $record | ConvertTo-Json | Set-Content (Join-Path $PSScriptRoot 'installation.json') -Encoding UTF8
 Get-Process native-sidebar -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq (Join-Path $PSScriptRoot 'native-sidebar.exe')} | Stop-Process

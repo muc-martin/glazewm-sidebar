@@ -1,8 +1,8 @@
 # Native Sidebar for GlazeWM
 
-A 32-pixel vertical Windows sidebar showing workspaces, time and date.
+A 28-pixel vertical Windows sidebar showing workspaces, time and date.
 Click a workspace to switch. That is the entire mouse interface: no scroll
-switching, modifier gestures, context menus or moving windows.
+switching, modifier gestures, sidebar context menus or moving windows.
 
 Written in C++ using Win32/GDI and the Windows WebSocket client. No browser,
 Python, .NET application runtime, animation loop or persistent CLI helper.
@@ -23,13 +23,13 @@ does not replace Zebar's general widget platform, tray widgets or media controls
 3. Double-click **Install.cmd**. No administrator rights are needed.
 
 Installation copies the app into `%LOCALAPPDATA%\Programs\NativeSidebar`,
-creates a Windows Startup shortcut and starts the new bar. The one-shot startup
+creates Windows Startup and Start menu shortcuts and starts the new bar. The one-shot startup
 script starts GlazeWM if necessary, then the sidebar, and exits. The sidebar
 reconnects if the window manager is not ready yet.
 
 The installer backs up the original GlazeWM configuration, removes Zebar/old
 sidebar commands from its startup and shutdown lists, adds an ignore rule for
-the native bar and sets the outer gaps to 44 px left / 8 px top. Other commands,
+the native bar and sets the outer gaps to 40 px left / 8 px top. Other commands,
 keybindings and settings are retained. A running Zebar is stopped at switch-over;
 Zebar itself and its widget settings remain installed.
 
@@ -53,10 +53,10 @@ configuration. `GLAZEWM_CONFIG_PATH` is honored when set.
 ## Use
 
 - A bar is placed on the left of every connected monitor.
-- Configured workspaces appear in order, including empty workspaces.
+- Only occupied workspaces and currently displayed/focused workspaces appear. Empty inactive workspaces are hidden.
 - One click switches to that workspace. The focused workspace is highlighted.
-- Workspaces visible on another monitor get a subtler highlight. A small marker
-  identifies occupied, unfocused workspaces.
+- Workspaces visible on another monitor get a subtler highlight. There are no
+  additional occupancy dots.
 - Windows time/date are displayed vertically and update at minute boundaries.
 - `!` means the connection to GlazeWM is unavailable; reconnect is automatic.
 - Fullscreen windows covering a monitor hide its sidebar.
@@ -64,9 +64,19 @@ configuration. `GLAZEWM_CONFIG_PATH` is honored when set.
 
 Workspace names are copied to `sidebar.ini` during installation. If you change
 the GlazeWM workspace list later, update that INI file and restart the sidebar.
+A fixed slate-gray palette works with light and dark Windows themes, without a theme switch. Workspace numbers use an 11-pixel font. The hand cursor appears only on workspace buttons; the rest uses the standard arrow.
+
 All active workspaces are available on each monitor; selection follows GlazeWM's
 normal monitor-assignment behavior. Buttons beyond the available vertical space
 are not shown; this version is intended for a small workspace list (e.g. 1–9).
+
+## Tray icon and startup
+
+The Windows notification area contains a Native Sidebar icon. Click or right-click
+it for **Show sidebar**, **Start with Windows**, and **Exit** (menu labels currently
+in German). The startup toggle uses the same shortcut as the installer. A **Native
+Sidebar** Start menu entry lets you launch it again after exiting. Explorer restart
+re-registers the tray icon. Windows may initially put the icon in its overflow area.
 
 ## Uninstall or update
 
@@ -76,7 +86,7 @@ Run **Uninstall.ps1** from the installation directory:
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\Programs\NativeSidebar\Uninstall.ps1"
 ```
 
-This removes its Startup shortcut, stops the installed sidebar, restores the
+This removes its Startup and Start menu shortcuts, stops the installed sidebar, restores the
 original GlazeWM config and starts Zebar when it was previously configured and
 can be found on PATH. The installation files and backup remain for recovery.
 If the GlazeWM config has changed since installation, uninstall stops before

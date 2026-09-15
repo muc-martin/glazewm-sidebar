@@ -19,6 +19,8 @@ try {
  Start-Sleep -Seconds 2
  $script:bar=[ClickTest]::FindWindow('NativeSidebar','Native Sidebar')
  $state=Get-Content (Join-Path (Split-Path $Binary) 'state.json') -Raw | ConvertFrom-Json
+ $expected=@(Workspaces | Where-Object {$_.hasFocus -or $_.isDisplayed -or $_.children.Count -gt 0} | ForEach-Object name | Sort-Object)
+ if(($expected -join ',') -ne (($state.workspaces.name|Sort-Object) -join ',')){throw 'Inactive workspaces were displayed'}
  if($state.workspaces.Count -lt 2){throw 'Test requires at least two configured workspaces'}
  $first=$state.workspaces[0].name;$second=$state.workspaces[1].name
  # These coordinates are logical pixels at the tested 96 DPI baseline.
@@ -30,6 +32,17 @@ try {
  foreach($window in $before){$same=$after|Where-Object id -eq $window.id;if($same -and $same.parentId -ne $window.parentId){throw 'Shift-click moved a window'}}
  Send 0x20A (120 -shl 16) 0;AssertFocus $first
  Send 0x7B 0 0;AssertFocus $first
+ $controller=[ClickTest]::FindWindow('NativeSidebarController','Native Sidebar Controller')
+ $shortcut=Join-Path ([Environment]::GetFolderPath('Startup')) 'Native Sidebar.lnk'
+ $saved=if(Test-Path $shortcut){[IO.File]::ReadAllBytes($shortcut)}else{$null}
+ try{
+   $existed=Test-Path $shortcut;$result=[IntPtr]::Zero
+   [ClickTest]::SendMessageTimeout($controller,0x111,[IntPtr]4102,[IntPtr]::Zero,2,2000,[ref]$result)|Out-Null
+   if((Test-Path $shortcut) -eq $existed){throw 'Tray autostart toggle failed'}
+   [ClickTest]::SendMessageTimeout($controller,0x111,[IntPtr]4102,[IntPtr]::Zero,2,2000,[ref]$result)|Out-Null
+   if((Test-Path $shortcut) -ne $existed){throw 'Tray autostart reverse toggle failed'}
+ }finally{if($saved){[IO.File]::WriteAllBytes($shortcut,$saved)}elseif(Test-Path $shortcut){Remove-Item -LiteralPath $shortcut}}
+ 'PASS: only occupied/current workspaces; tray autostart toggle and restore.'
  'PASS: click switches; Shift-click only switches; scroll and right-click do nothing.'
  Get-Process -Id $process.Id | Select-Object @{n='WorkingSetMB';e={[math]::Round($_.WorkingSet64/1MB,2)}},@{n='PrivateCommitMB';e={[math]::Round($_.PrivateMemorySize64/1MB,2)}}
 }finally {
