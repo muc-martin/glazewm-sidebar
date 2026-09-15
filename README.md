@@ -67,7 +67,7 @@ configuration. `GLAZEWM_CONFIG_PATH` is honored when set.
 Workspace names are copied to `sidebar.ini` during installation. If you change
 the GlazeWM workspace list later, update that INI file and restart the sidebar.
 The original dark charcoal sidebar palette works with light and dark Windows themes.
-Segoe UI Variable gives workspace labels (12 px) and the stacked clock (16 px) a clear, consistent shape; Windows supplies a font fallback on older systems. The hand cursor appears only on workspace
+Segoe UI Variable gives workspace labels (13 px, bold when focused) and the stacked clock (16 px) a clear, consistent shape; Windows supplies a font fallback on older systems. The hand cursor appears only on workspace
 buttons and the theme button; the rest uses the standard arrow.
 
 ### Optional widgets
@@ -84,8 +84,8 @@ default; selections are saved in the installation's `sidebar.ini` and survive up
   On systems with more than 64 logical processors, `GetSystemTimes` covers the
   calling thread's processor group.
 - **RAM:** percentage of physical memory in use, refreshed every five seconds.
-- **Battery symbol:** battery charge percentage as a bold number inside the compact icon, refreshed every minute and on Windows power
-  notifications. `--` means unavailable or no battery; CPU also shows `--` before
+- **Battery symbol:** battery charge percentage as a centered bold number inside the compact, antialiased icon, refreshed every minute and on Windows power
+  notifications. Green fill and a lightning bolt indicate the power adapter is connected, including when the battery is full. `--` means unavailable or no battery; CPU also shows `--` before
   its first complete sampling interval.
 
 One shared timer samples native Windows APIs for all monitors. Disabled widgets

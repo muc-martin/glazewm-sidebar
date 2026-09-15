@@ -7,6 +7,7 @@ enum Kind { Theme, Cpu, Ram, Battery, Count };
 extern bool enabled[Count];
 extern int cpu, ram, battery;
 extern bool light;
+extern bool pluggedIn;
 void load(const std::wstring &path);
 bool toggle(int kind);
 bool sample(bool powerOnly = false);

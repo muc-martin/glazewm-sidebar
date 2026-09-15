@@ -9,6 +9,7 @@ namespace widgets {
 bool enabled[Count] = {true, true, true, true};
 int cpu = -1, ram = -1, battery = -1;
 bool light = true;
+bool pluggedIn = false;
 static std::wstring ini;
 static const wchar_t *keys[] = {L"theme", L"cpu", L"ram", L"battery"};
 static constexpr auto personalize =
@@ -49,6 +50,7 @@ static ULONGLONG ticks(FILETIME t) {
 }
 bool sample(bool powerOnly) {
   int oldCpu = cpu, oldRam = ram, oldBattery = battery;
+  bool oldPluggedIn = pluggedIn;
   if (!powerOnly && enabled[Cpu]) {
     FILETIME idle{}, kernel{}, user{};
     if (GetSystemTimes(&idle, &kernel, &user)) {
@@ -73,14 +75,18 @@ bool sample(bool powerOnly) {
   if (enabled[Battery] &&
       (powerOnly || !lastPower || now - lastPower >= 60000)) {
     SYSTEM_POWER_STATUS status{};
-    battery = GetSystemPowerStatus(&status) && status.BatteryFlag != 255 &&
+    bool valid = GetSystemPowerStatus(&status) != FALSE;
+    pluggedIn = valid && status.BatteryFlag != 255 &&
+                !(status.BatteryFlag & 128) && status.ACLineStatus == 1;
+    battery = valid && status.BatteryFlag != 255 &&
                       !(status.BatteryFlag & 128) &&
                       status.BatteryLifePercent <= 100
                   ? status.BatteryLifePercent
                   : -1;
     lastPower = now;
   }
-  return cpu != oldCpu || ram != oldRam || battery != oldBattery;
+  return cpu != oldCpu || ram != oldRam || battery != oldBattery ||
+         pluggedIn != oldPluggedIn;
 }
 void refreshTheme() {
   DWORD value = 1, size = sizeof(value);

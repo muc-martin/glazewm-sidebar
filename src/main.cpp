@@ -32,9 +32,12 @@ struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
   HBITMAP moon = nullptr;
+  HBITMAP batteryImage = nullptr;
+  int drawnBattery = -2;
+  bool drawnPluggedIn = false;
   int dpi = 96, hover = -1;
   HFONT font = nullptr, smallFont = nullptr, clockFont = nullptr,
-        batteryFont = nullptr;
+        batteryFont = nullptr, activeFont = nullptr;
 };
 std::vector<Bar *> bars;
 Snapshot currentState, pending;
@@ -72,6 +75,75 @@ HBITMAP moonBitmap(int size) {
           green = 26 + (232 - 26) * covered / 16,
           blue = 32 + (242 - 32) * covered / 16;
       pixels[y * size + x] = (red << 16) | (green << 8) | blue;
+    }
+  return bitmap;
+}
+HBITMAP batteryBitmap(int width, int height, int percentage, bool pluggedIn) {
+  BITMAPINFO info{};
+  info.bmiHeader = {sizeof(BITMAPINFOHEADER), width, -height, 1, 32, BI_RGB};
+  DWORD *pixels = nullptr;
+  auto bitmap =
+      CreateDIBSection(nullptr, &info, DIB_RGB_COLORS,
+                       reinterpret_cast<void **>(&pixels), nullptr, 0);
+  if (!bitmap)
+    return nullptr;
+  for (int y = 0; y < height; ++y)
+    for (int x = 0; x < width; ++x) {
+      int red = 0, green = 0, blue = 0;
+      for (int sy = 0; sy < 4; ++sy)
+        for (int sx = 0; sx < 4; ++sx) {
+          double lx = (x + (sx + 0.5) / 4) * 40 / width,
+                 ly = (y + (sy + 0.5) / 4) * 32 / height;
+          double dx = std::max(std::abs(lx - 19) - 9.0, 0.0),
+                 dy = std::max(std::abs(ly - 13.5) - 4.5, 0.0);
+          int r = 23, g = 26, b = 32;
+          if (dx * dx + dy * dy <= 9) {
+            r = 57;
+            g = 65;
+            b = 76;
+            if (percentage > 0 && lx < 7 + 24.0 * percentage / 100) {
+              if (pluggedIn) {
+                r = 130;
+                g = 210;
+                b = 159;
+              } else if (percentage <= 20) {
+                r = 232;
+                g = 157;
+                b = 135;
+              } else {
+                r = 199;
+                g = 214;
+                b = 228;
+              }
+            }
+          }
+          if (lx >= 32 && lx <= 34 && ly >= 11 && ly <= 16) {
+            r = 139;
+            g = 153;
+            b = 170;
+          }
+          // Small filled lightning bolt alongside the body, rasterized with the
+          // same antialiasing.
+          if (pluggedIn) {
+            const double vx[] = {5.8, 1.5, 3.9, 2.7, 7.0, 4.6};
+            const double vy[] = {7, 13.6, 13.6, 20, 12, 12};
+            bool inside = false;
+            for (int i = 0, j = 5; i < 6; j = i++)
+              if ((vy[i] > ly) != (vy[j] > ly) &&
+                  lx < (vx[j] - vx[i]) * (ly - vy[i]) / (vy[j] - vy[i]) + vx[i])
+                inside = !inside;
+            if (inside) {
+              r = 130;
+              g = 210;
+              b = 159;
+            }
+          }
+          red += r;
+          green += g;
+          blue += b;
+        }
+      pixels[y * width + x] =
+          ((red / 16) << 16) | ((green / 16) << 8) | (blue / 16);
     }
   return bitmap;
 }
@@ -272,7 +344,8 @@ void armWidgets() {
 void widgetDiagnostics() {
   if (!diagnostics)
     return;
-  json j = {{"cpu", widgets::cpu},
+  json j = {{"pluggedIn", widgets::pluggedIn},
+            {"cpu", widgets::cpu},
             {"ram", widgets::ram},
             {"battery", widgets::battery},
             {"light", widgets::light},
@@ -373,7 +446,7 @@ void paint(Bar *b, HDC target = nullptr) {
     }
     auto label = wide(w.label);
     auto color = w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195);
-    centeredNumber(dc, label, r, color, b->font);
+    centeredNumber(dc, label, r, color, w.focused ? b->activeFont : b->font);
   }
   if (!currentState.connected) {
     RECT r = {0, px(b, 8), rc.right, px(b, 36)};
@@ -448,15 +521,21 @@ void paint(Bar *b, HDC target = nullptr) {
   }
   if (widgets::enabled[widgets::Battery]) {
     RECT body = {px(b, 7), y + px(b, 6), rc.right - px(b, 9), y + px(b, 21)};
-    auto brush = CreateSolidBrush(RGB(57, 65, 76));
-    auto oldBrush = SelectObject(dc, brush);
-    auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
-    RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
-              px(b, 8));
-    RECT terminal = {body.right + px(b, 1), body.top + px(b, 5),
-                     body.right + px(b, 3), body.bottom - px(b, 5)};
-    SetDCBrushColor(dc, RGB(139, 153, 170));
-    FillRect(dc, &terminal, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+    if (!b->batteryImage || b->drawnBattery != widgets::battery ||
+        b->drawnPluggedIn != widgets::pluggedIn) {
+      DeleteObject(b->batteryImage);
+      b->batteryImage = batteryBitmap(px(b, 40), px(b, 32), widgets::battery,
+                                      widgets::pluggedIn);
+      b->drawnBattery = widgets::battery;
+      b->drawnPluggedIn = widgets::pluggedIn;
+    }
+    if (b->batteryImage) {
+      auto source = CreateCompatibleDC(dc);
+      auto previous = SelectObject(source, b->batteryImage);
+      BitBlt(dc, 0, y, px(b, 40), px(b, 32), source, 0, 0, SRCCOPY);
+      SelectObject(source, previous);
+      DeleteDC(source);
+    }
     auto value =
         widgets::battery < 0 ? L"--" : std::to_wstring(widgets::battery);
     centeredNumber(dc, value, body, RGB(229, 235, 243), b->batteryFont);
@@ -466,17 +545,9 @@ void paint(Bar *b, HDC target = nullptr) {
           dc, body.left, body.top,
           body.left + MulDiv(body.right - body.left, widgets::battery, 100),
           body.bottom);
-      SelectObject(dc, GetStockObject(DC_BRUSH));
-      SetDCBrushColor(dc, widgets::battery <= 20 ? RGB(232, 157, 135)
-                                                 : RGB(199, 214, 228));
-      RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
-                px(b, 8));
       centeredNumber(dc, value, body, RGB(23, 26, 32), b->batteryFont);
       RestoreDC(dc, saved);
     }
-    SelectObject(dc, oldPen);
-    SelectObject(dc, oldBrush);
-    DeleteObject(brush);
   }
   if (!target)
     EndPaint(b->hwnd, &ps);
@@ -573,7 +644,11 @@ BOOL CALLBACK addMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM) {
                       nullptr, nullptr, GetModuleHandleW(nullptr), b);
   b->dpi = GetDpiForWindow(b->hwnd);
   b->font =
-      CreateFontW(-px(b, 12), 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
+      CreateFontW(-px(b, 13), 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
+                  DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
+  b->activeFont =
+      CreateFontW(-px(b, 13), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                   CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
   b->smallFont =
@@ -603,6 +678,8 @@ void rebuild() {
     DeleteObject(b->clockFont);
     DeleteObject(b->batteryFont);
     DeleteObject(b->moon);
+    DeleteObject(b->batteryImage);
+    DeleteObject(b->activeFont);
     delete b;
   }
   bars.clear();
