@@ -9,6 +9,8 @@ Written in C++ using Win32/GDI and the Windows WebSocket client. No browser,
 Python, .NET application runtime, animation loop or persistent CLI helper.
 Validation instructions are in [testing](docs/TESTING.md). There are no additional processes for the widgets.
 
+![Native Sidebar on Windows, showing workspaces, theme switch, CPU, RAM, battery, time and date](docs/images/sidebar-desktop.png)
+
 ## Status
 
 Version 0.1.0, prepared for a first public release. Requires Windows x64 and GlazeWM.
