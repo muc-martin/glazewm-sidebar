@@ -13,7 +13,25 @@ optional CPU, RAM, battery and Windows theme controls above them.
 
 ## Memory usage
 
-The 40-pixel development build used **about 14 MB of RAM with widgets enabled**.
+**From about 824 MB with my Zebar setup to 14 MB with Native Sidebar.**
+Reducing that memory footprint was the reason I built this bar.
+
+| Setup | Recorded working set |
+| --- | ---: |
+| Zebar with Overline, including its separate browser environment and core process | ~824 MB |
+| Overline bar and its browser processes alone (part of the total above) | ~425 MB |
+| Native Sidebar with widgets enabled | 14.07 MB |
+
+The full Zebar setup used about 425 MB for Overline, 318 MB for its separate
+browser environment and 81 MB for the core process, before opening settings.
+Native Sidebar's recorded working set was **about 98% lower** than that total.
+These are process working-set readings from one PC; Zebar's sum includes shared
+memory, so the difference is not a measure of physical RAM freed. The Overline
+setup also ran additional widgets, including weather, media and system-tray icons.
+
+### Native Sidebar measurements
+
+The following readings are from the 40-pixel development build.
 
 | Recorded test | Working set (RAM) | Private committed memory |
 | --- | ---: | ---: |
