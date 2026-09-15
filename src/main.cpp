@@ -100,6 +100,12 @@ Snapshot decode(const json &j) {
     v.occupied = !w.value("children", json::array()).empty();
     s.workspaces.push_back(v);
   }
+  // Keep empty configured workspaces accessible with the same single click.
+  for (const auto &name : configured) {
+    if (std::none_of(s.workspaces.begin(), s.workspaces.end(),
+                     [&](const auto &w) { return w.name == name; }))
+      s.workspaces.push_back({name, name, false, false, false});
+  }
   return s;
 }
 void connectionLoop() {
@@ -190,11 +196,9 @@ void connectionLoop() {
       Sleep(100);
   }
 }
-void focusWorkspace(const std::string &name, bool move) {
+void focusWorkspace(const std::string &name) {
   if (!currentState.connected)
     return;
-  if (move)
-    sendCommand("command move --workspace " + name);
   sendCommand("command focus --workspace " + name);
 }
 int rowAt(Bar *b, int y) {
@@ -272,29 +276,6 @@ void armClock(HWND h) {
   GetLocalTime(&t);
   SetTimer(h, 1, 60000 - t.wSecond * 1000 - t.wMilliseconds, nullptr);
 }
-void contextMenu(Bar *b) {
-  HMENU m = CreatePopupMenu();
-  for (size_t i = 0; i < configured.size(); i++) {
-    auto found = std::find_if(
-        currentState.workspaces.begin(), currentState.workspaces.end(),
-        [&](auto &w) { return w.name == configured[i] && w.focused; });
-    AppendMenuW(m,
-                MF_STRING |
-                    (found != currentState.workspaces.end() ? MF_CHECKED : 0),
-                100 + i, (L"Workspace " + wide(configured[i])).c_str());
-  }
-  AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(m, MF_STRING, 1, L"Exit sidebar");
-  POINT p;
-  GetCursorPos(&p);
-  auto cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
-                            p.x, p.y, 0, b->hwnd, nullptr);
-  DestroyMenu(m);
-  if (cmd == 1)
-    PostMessageW(controller, WM_CLOSE, 0, 0);
-  else if (cmd >= 100 && cmd < 100 + configured.size())
-    focusWorkspace(configured[cmd - 100], false);
-}
 LRESULT CALLBACK barProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
   Bar *b = (Bar *)GetWindowLongPtrW(h, GWLP_USERDATA);
   if (msg == WM_NCCREATE) {
@@ -315,21 +296,11 @@ LRESULT CALLBACK barProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
   case WM_LBUTTONUP: {
     int i = rowAt(b, GET_Y_LPARAM(l));
     if (i >= 0)
-      focusWorkspace(currentState.workspaces[i].name, (w & MK_SHIFT) != 0);
+      focusWorkspace(currentState.workspaces[i].name);
     return 0;
   }
-  case WM_COMMAND:
-    if (LOWORD(w) >= 100 && LOWORD(w) < 100 + configured.size())
-      focusWorkspace(configured[LOWORD(w) - 100], false);
-    return 0;
   case WM_MOUSEWHEEL:
-    if (currentState.connected)
-      sendCommand(GET_WHEEL_DELTA_WPARAM(w) > 0
-                      ? "command focus --prev-active-workspace"
-                      : "command focus --next-active-workspace");
-    return 0;
   case WM_CONTEXTMENU:
-    contextMenu(b);
     return 0;
   case WM_MOUSEMOVE: {
     int i = rowAt(b, GET_Y_LPARAM(l));
