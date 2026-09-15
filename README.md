@@ -11,6 +11,20 @@ optional CPU, RAM, battery and Windows theme controls above them.
 
 ![Native Sidebar on a Windows desktop](docs/images/sidebar-desktop.png)
 
+## Memory usage
+
+The 40-pixel development build used **about 14 MB of RAM with widgets enabled**.
+
+| Recorded test | Working set (RAM) | Private committed memory |
+| --- | ---: | ---: |
+| Widgets disabled | 14.12 MB | 2.95 MB |
+| Widgets enabled | 14.07 MB | 2.86 MB |
+| After toggling Windows startup through the tray menu | 21.37 MB | 3.50 MB |
+
+Recorded on Windows 11 x64 with one 96-DPI monitor. The widget samples lasted
+15 seconds; the tray reading was taken after the startup-shortcut test.
+Working set includes shared Windows libraries.
+
 ## Install
 
 Requires Windows x64 and GlazeWM.
