@@ -31,6 +31,7 @@ struct Snapshot {
 struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
+  HBITMAP moon = nullptr;
   int dpi = 96, hover = -1;
   HFONT font = nullptr, smallFont = nullptr, clockFont = nullptr,
         batteryFont = nullptr;
@@ -47,6 +48,33 @@ std::vector<std::string> configured;
 bool diagnostics = false;
 UINT taskbarCreated = 0;
 int px(Bar *b, int v) { return MulDiv(v, b->dpi, 96); }
+HBITMAP moonBitmap(int size) {
+  BITMAPINFO info{};
+  info.bmiHeader = {sizeof(BITMAPINFOHEADER), size, -size, 1, 32, BI_RGB};
+  DWORD *pixels = nullptr;
+  auto bitmap =
+      CreateDIBSection(nullptr, &info, DIB_RGB_COLORS,
+                       reinterpret_cast<void **>(&pixels), nullptr, 0);
+  if (!bitmap)
+    return nullptr;
+  for (int y = 0; y < size; ++y)
+    for (int x = 0; x < size; ++x) {
+      int covered = 0;
+      for (int sy = 0; sy < 4; ++sy)
+        for (int sx = 0; sx < 4; ++sx) {
+          double dx = (x + (sx + 0.5) / 4) * 18 / size - 9,
+                 dy = (y + (sy + 0.5) / 4) * 18 / size - 9;
+          double cutX = dx - 3.5, cutY = dy + 2.5;
+          if (dx * dx + dy * dy <= 42.25 && cutX * cutX + cutY * cutY > 36)
+            ++covered;
+        }
+      int red = 23 + (224 - 23) * covered / 16,
+          green = 26 + (232 - 26) * covered / 16,
+          blue = 32 + (242 - 32) * covered / 16;
+      pixels[y * size + x] = (red << 16) | (green << 8) | blue;
+    }
+  return bitmap;
+}
 std::wstring wide(const std::string &s) {
   int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
   std::wstring r(n, 0);
@@ -276,6 +304,48 @@ void text(HDC dc, const std::wstring &s, RECT r, COLORREF color, HFONT font) {
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS |
                 DT_NOPREFIX);
 }
+// Center the actual ink rather than the font line box (which includes
+// ascenders/descenders).
+void centeredNumber(HDC dc, const std::wstring &value, RECT r, COLORREF color,
+                    HFONT font) {
+  if (std::any_of(value.begin(), value.end(), [](wchar_t ch) {
+        return (ch < L'0' || ch > L'9') && ch != L'-';
+      })) {
+    text(dc, value, r, color, font);
+    return;
+  }
+  SelectObject(dc, font);
+  MAT2 matrix = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
+  int advance = 0, left = INT_MAX, right = INT_MIN, top = INT_MAX,
+      bottom = INT_MIN;
+  for (auto ch : value) {
+    GLYPHMETRICS glyph{};
+    if (GetGlyphOutlineW(dc, ch, GGO_METRICS, &glyph, 0, nullptr, &matrix) ==
+        GDI_ERROR) {
+      text(dc, value, r, color, font);
+      return;
+    }
+    left = std::min(left, advance + static_cast<int>(glyph.gmptGlyphOrigin.x));
+    right = std::max(right, advance + static_cast<int>(glyph.gmptGlyphOrigin.x +
+                                                       glyph.gmBlackBoxX));
+    top = std::min(top, -static_cast<int>(glyph.gmptGlyphOrigin.y));
+    bottom = std::max(bottom, -static_cast<int>(glyph.gmptGlyphOrigin.y) +
+                                  static_cast<int>(glyph.gmBlackBoxY));
+    advance += glyph.gmCellIncX;
+  }
+  if (value.empty())
+    return;
+  if (right - left > r.right - r.left) {
+    text(dc, value, r, color, font);
+    return;
+  }
+  auto alignment = SetTextAlign(dc, TA_LEFT | TA_BASELINE);
+  SetTextColor(dc, color);
+  TextOutW(dc, (r.left + r.right - (right - left)) / 2 - left,
+           (r.top + r.bottom - (bottom - top)) / 2 - top, value.c_str(),
+           static_cast<int>(value.size()));
+  SetTextAlign(dc, alignment);
+}
 void paint(Bar *b, HDC target = nullptr) {
   PAINTSTRUCT ps;
   HDC dc = target ? target : BeginPaint(b->hwnd, &ps);
@@ -303,25 +373,7 @@ void paint(Bar *b, HDC target = nullptr) {
     }
     auto label = wide(w.label);
     auto color = w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195);
-    // Center the visible numeral, including fonts with asymmetric side
-    // bearings.
-    SelectObject(dc, b->font);
-    MAT2 matrix = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
-    GLYPHMETRICS glyph{};
-    if (label.size() == 1 && label[0] >= L'0' && label[0] <= L'9' &&
-        GetGlyphOutlineW(dc, label[0], GGO_METRICS, &glyph, 0, nullptr,
-                         &matrix) != GDI_ERROR) {
-      int x = (r.left + r.right - static_cast<int>(glyph.gmBlackBoxX)) / 2 -
-              glyph.gmptGlyphOrigin.x;
-      int baseline =
-          (r.top + r.bottom - static_cast<int>(glyph.gmBlackBoxY)) / 2 +
-          glyph.gmptGlyphOrigin.y;
-      auto alignment = SetTextAlign(dc, TA_LEFT | TA_BASELINE);
-      SetTextColor(dc, color);
-      TextOutW(dc, x, baseline, label.c_str(), 1);
-      SetTextAlign(dc, alignment);
-    } else
-      text(dc, label, r, color, b->font);
+    centeredNumber(dc, label, r, color, b->font);
   }
   if (!currentState.connected) {
     RECT r = {0, px(b, 8), rc.right, px(b, 36)};
@@ -366,12 +418,16 @@ void paint(Bar *b, HDC target = nullptr) {
         LineTo(dc, cx + px(b, ray[2]), cy + px(b, ray[3]));
       }
     } else {
-      SelectObject(dc, GetStockObject(NULL_PEN));
-      SelectObject(dc, GetStockObject(DC_BRUSH));
-      SetDCBrushColor(dc, RGB(224, 232, 242));
-      Ellipse(dc, cx - px(b, 6), cy - px(b, 6), cx + px(b, 7), cy + px(b, 7));
-      SetDCBrushColor(dc, RGB(23, 26, 32));
-      Ellipse(dc, cx - px(b, 2), cy - px(b, 8), cx + px(b, 9), cy + px(b, 3));
+      if (!b->moon)
+        b->moon = moonBitmap(px(b, 18));
+      if (b->moon) {
+        auto source = CreateCompatibleDC(dc);
+        auto previous = SelectObject(source, b->moon);
+        BitBlt(dc, cx - px(b, 9), cy - px(b, 9), px(b, 18), px(b, 18), source,
+               0, 0, SRCCOPY);
+        SelectObject(source, previous);
+        DeleteDC(source);
+      }
     }
     SelectObject(dc, oldPen);
     SelectObject(dc, oldBrush);
@@ -391,19 +447,19 @@ void paint(Bar *b, HDC target = nullptr) {
     y += px(b, 34);
   }
   if (widgets::enabled[widgets::Battery]) {
-    RECT body = {px(b, 5), y + px(b, 4), rc.right - px(b, 7), y + px(b, 22)};
+    RECT body = {px(b, 7), y + px(b, 6), rc.right - px(b, 9), y + px(b, 21)};
     auto brush = CreateSolidBrush(RGB(57, 65, 76));
     auto oldBrush = SelectObject(dc, brush);
     auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
     RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
               px(b, 8));
-    RECT terminal = {body.right + px(b, 1), body.top + px(b, 6),
-                     body.right + px(b, 3), body.bottom - px(b, 6)};
+    RECT terminal = {body.right + px(b, 1), body.top + px(b, 5),
+                     body.right + px(b, 3), body.bottom - px(b, 5)};
     SetDCBrushColor(dc, RGB(139, 153, 170));
     FillRect(dc, &terminal, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
     auto value =
         widgets::battery < 0 ? L"--" : std::to_wstring(widgets::battery);
-    text(dc, value, body, RGB(229, 235, 243), b->batteryFont);
+    centeredNumber(dc, value, body, RGB(229, 235, 243), b->batteryFont);
     if (widgets::battery > 0) {
       int saved = SaveDC(dc);
       IntersectClipRect(
@@ -415,7 +471,7 @@ void paint(Bar *b, HDC target = nullptr) {
                                                  : RGB(199, 214, 228));
       RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
                 px(b, 8));
-      text(dc, value, body, RGB(23, 26, 32), b->batteryFont);
+      centeredNumber(dc, value, body, RGB(23, 26, 32), b->batteryFont);
       RestoreDC(dc, saved);
     }
     SelectObject(dc, oldPen);
@@ -529,7 +585,7 @@ BOOL CALLBACK addMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM) {
                              CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                              DEFAULT_PITCH, L"Segoe UI Variable Display");
   b->batteryFont =
-      CreateFontW(-px(b, 14), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+      CreateFontW(-px(b, 11), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                   CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
   SetWindowPos(b->hwnd, HWND_TOPMOST, mi.rcWork.left + px(b, 4),
@@ -546,6 +602,7 @@ void rebuild() {
     DeleteObject(b->smallFont);
     DeleteObject(b->clockFont);
     DeleteObject(b->batteryFont);
+    DeleteObject(b->moon);
     delete b;
   }
   bars.clear();
