@@ -122,20 +122,20 @@ HBITMAP batteryBitmap(int width, int height, int percentage, bool pluggedIn) {
             g = 153;
             b = 170;
           }
-          // Small filled lightning bolt alongside the body, rasterized with the
-          // same antialiasing.
+          // Bolt sits inside the battery, with contrast matching its fill.
           if (pluggedIn) {
-            const double vx[] = {5.8, 1.5, 3.9, 2.7, 7.0, 4.6};
-            const double vy[] = {7, 13.6, 13.6, 20, 12, 12};
+            const double vx[] = {11.8, 8.5, 10.2, 9.4, 12.9, 11.0};
+            const double vy[] = {8.5, 13.5, 13.5, 18.5, 12.4, 12.4};
             bool inside = false;
             for (int i = 0, j = 5; i < 6; j = i++)
               if ((vy[i] > ly) != (vy[j] > ly) &&
                   lx < (vx[j] - vx[i]) * (ly - vy[i]) / (vy[j] - vy[i]) + vx[i])
                 inside = !inside;
             if (inside) {
-              r = 130;
-              g = 210;
-              b = 159;
+              bool filled = percentage > 0 && lx < 7 + 24.0 * percentage / 100;
+              r = filled ? 23 : 229;
+              g = filled ? 26 : 235;
+              b = filled ? 32 : 243;
             }
           }
           red += r;
@@ -538,14 +538,17 @@ void paint(Bar *b, HDC target = nullptr) {
     }
     auto value =
         widgets::battery < 0 ? L"--" : std::to_wstring(widgets::battery);
-    centeredNumber(dc, value, body, RGB(229, 235, 243), b->batteryFont);
+    RECT number = body;
+    if (widgets::pluggedIn)
+      number.left = px(b, 13);
+    centeredNumber(dc, value, number, RGB(229, 235, 243), b->batteryFont);
     if (widgets::battery > 0) {
       int saved = SaveDC(dc);
       IntersectClipRect(
           dc, body.left, body.top,
           body.left + MulDiv(body.right - body.left, widgets::battery, 100),
           body.bottom);
-      centeredNumber(dc, value, body, RGB(23, 26, 32), b->batteryFont);
+      centeredNumber(dc, value, number, RGB(23, 26, 32), b->batteryFont);
       RestoreDC(dc, saved);
     }
   }
