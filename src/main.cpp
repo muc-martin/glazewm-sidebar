@@ -667,8 +667,8 @@ BOOL CALLBACK addMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM) {
                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                   CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
   SetWindowPos(b->hwnd, HWND_TOPMOST, mi.rcWork.left + px(b, 4),
-               mi.rcWork.top + px(b, 4), px(b, BarWidth),
-               mi.rcWork.bottom - mi.rcWork.top - px(b, 8),
+               mi.rcWork.top, px(b, BarWidth),
+               mi.rcWork.bottom - mi.rcWork.top - px(b, 4),
                SWP_NOACTIVATE | SWP_SHOWWINDOW);
   bars.push_back(b);
   return TRUE;
