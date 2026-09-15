@@ -300,8 +300,27 @@ void paint(Bar *b, HDC target = nullptr) {
       SelectObject(dc, old);
       DeleteObject(brush);
     }
-    text(dc, wide(w.label), r,
-         w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195), b->font);
+    auto label = wide(w.label);
+    auto color = w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195);
+    // Center the visible numeral, including fonts with asymmetric side
+    // bearings.
+    SelectObject(dc, b->font);
+    MAT2 matrix = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
+    GLYPHMETRICS glyph{};
+    if (label.size() == 1 && label[0] >= L'0' && label[0] <= L'9' &&
+        GetGlyphOutlineW(dc, label[0], GGO_METRICS, &glyph, 0, nullptr,
+                         &matrix) != GDI_ERROR) {
+      int x = (r.left + r.right - static_cast<int>(glyph.gmBlackBoxX)) / 2 -
+              glyph.gmptGlyphOrigin.x;
+      int baseline =
+          (r.top + r.bottom - static_cast<int>(glyph.gmBlackBoxY)) / 2 +
+          glyph.gmptGlyphOrigin.y;
+      auto alignment = SetTextAlign(dc, TA_LEFT | TA_BASELINE);
+      SetTextColor(dc, color);
+      TextOutW(dc, x, baseline, label.c_str(), 1);
+      SetTextAlign(dc, alignment);
+    } else
+      text(dc, label, r, color, b->font);
   }
   if (!currentState.connected) {
     RECT r = {0, px(b, 8), rc.right, px(b, 36)};
@@ -362,26 +381,36 @@ void paint(Bar *b, HDC target = nullptr) {
     y += px(b, 34);
   }
   if (widgets::enabled[widgets::Battery]) {
-    // Stable light body keeps the percentage legible even at a low charge.
-    RECT body = {px(b, 5), y + px(b, 5), rc.right - px(b, 7), y + px(b, 22)};
-    auto brush = CreateSolidBrush(RGB(210, 221, 230));
+    RECT body = {px(b, 3), y + px(b, 3), rc.right - px(b, 5), y + px(b, 23)};
+    auto brush = CreateSolidBrush(RGB(57, 65, 76));
     auto oldBrush = SelectObject(dc, brush);
     auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
-    RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 5),
-              px(b, 5));
+    RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
+              px(b, 8));
     RECT terminal = {body.right + px(b, 1), body.top + px(b, 5),
                      body.right + px(b, 3), body.bottom - px(b, 5)};
-    FillRect(dc, &terminal, brush);
+    SetDCBrushColor(dc, RGB(139, 153, 170));
+    FillRect(dc, &terminal, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+    auto value =
+        widgets::battery < 0 ? L"--" : std::to_wstring(widgets::battery);
+    text(dc, value, body, RGB(229, 235, 243), b->font);
+    if (widgets::battery > 0) {
+      int saved = SaveDC(dc);
+      IntersectClipRect(
+          dc, body.left, body.top,
+          body.left + MulDiv(body.right - body.left, widgets::battery, 100),
+          body.bottom);
+      SelectObject(dc, GetStockObject(DC_BRUSH));
+      SetDCBrushColor(dc, widgets::battery <= 20 ? RGB(232, 157, 135)
+                                                 : RGB(199, 214, 228));
+      RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 8),
+                px(b, 8));
+      text(dc, value, body, RGB(23, 26, 32), b->font);
+      RestoreDC(dc, saved);
+    }
     SelectObject(dc, oldPen);
     SelectObject(dc, oldBrush);
     DeleteObject(brush);
-    auto color = widgets::battery >= 0 && widgets::battery <= 20
-                     ? RGB(145, 38, 43)
-                     : RGB(23, 26, 32);
-    text(dc,
-         widgets::battery < 0 ? L"--"
-                              : std::to_wstring(widgets::battery) + L"%",
-         body, color, b->smallFont);
   }
   if (!target)
     EndPaint(b->hwnd, &ps);
