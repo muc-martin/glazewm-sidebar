@@ -52,7 +52,7 @@ function ConvertTo-SidebarConfiguration {
         if($lines[$i] -match '^\S|^  \S') {break}
         if($lines[$i] -match '^    (top|left):\s*[''"]?([0-9.]+)px[''"]?\s*(?:#.*)?$') {
             $key=$Matches[1]; if($found.ContainsKey($key)){throw 'Duplicate gap key.'};$found[$key]=$true
-            $amount=if($key -eq 'left'){40}else{8};$lines[$i]="    ${key}: '${amount}px'"
+            $amount=if($key -eq 'left'){52}else{8};$lines[$i]="    ${key}: '${amount}px'"
         }
     }
     if($found.Count -ne 2){throw 'Expected top and left pixel gaps; configuration was not changed.'}

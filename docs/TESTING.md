@@ -25,3 +25,20 @@ With a test GlazeWM setup:
 6. Connect/remove monitors, test mixed DPI, and fullscreen/unfullscreen.
 7. Sign out/in and verify exactly one sidebar and one window manager start.
 8. Uninstall; verify original bar/configuration and startup state.
+
+## Widget acceptance
+
+The isolated CTest suite also checks CPU delta arithmetic and preservation of
+disabled widgets through installer upgrades. Run the opt-in live test after
+exiting the current sidebar:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/Widgets.Tests.ps1 -Binary "$PWD\build\Release\native-sidebar.exe"
+```
+
+This test temporarily switches the Windows app/system theme in both directions,
+restores the original settings in `finally`, checks native sample ranges, toggles
+widgets, checks that sampling stops when disabled, and verifies preferences after
+a full process restart. It compares process memory and CPU time over 15-second
+windows with widgets off/on. Diagnostics writes are enabled during this test;
+normal operation does not write these snapshots. It needs a live Windows desktop.

@@ -5,4 +5,5 @@
 *.pdb
 *.exe
 state.json
+widgets.json
 last-error.txt

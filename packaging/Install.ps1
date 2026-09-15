@@ -40,7 +40,17 @@ $stage=Join-Path ([IO.Path]::GetDirectoryName($InstallDirectory)) ('NativeSideba
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 $files=@('native-sidebar.exe','Start-Sidebar.ps1','Uninstall.ps1','Configuration.ps1','README.md','LICENSE','THIRD_PARTY_NOTICES.md')
 foreach($name in $files){Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $stage}
-[IO.File]::WriteAllText((Join-Path $stage 'sidebar.ini'),"[sidebar]`r`nworkspaces="+($names -join ','),[Text.UTF8Encoding]::new($false))
+$ini="[sidebar]`r`nworkspaces="+($names -join ',')+"`r`n"
+$oldIni=Join-Path $InstallDirectory 'sidebar.ini'
+if($previous -and (Test-Path -LiteralPath $oldIni)){
+  # Preserve user widget preferences on upgrade; only refresh workspace ordering.
+  $section='';$lines=foreach($line in [IO.File]::ReadAllLines($oldIni)){
+    if($line -match '^\s*\[([^\]]+)\]'){ $section=$Matches[1] }
+    if($section -eq 'sidebar' -and $line -match '^\s*workspaces\s*='){ 'workspaces='+($names -join ',') }else{ $line }
+  }
+  $ini=($lines -join "`r`n")+"`r`n"
+}
+[IO.File]::WriteAllText((Join-Path $stage 'sidebar.ini'),$ini,[Text.UTF8Encoding]::new($false))
 $original=if($previous){[IO.File]::ReadAllText((Join-Path $InstallDirectory 'original-config.yaml'))}else{$before}
 [IO.File]::WriteAllText((Join-Path $stage 'original-config.yaml'),$original,[Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $stage 'installed-config.yaml'),$after,[Text.UTF8Encoding]::new($false))

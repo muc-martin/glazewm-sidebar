@@ -1,11 +1,13 @@
 # Native Sidebar for GlazeWM
 
-A 28-pixel vertical Windows sidebar showing workspaces, time and date.
-Click a workspace to switch. That is the entire mouse interface: no scroll
-switching, modifier gestures, sidebar context menus or moving windows.
+A 40-pixel vertical Windows sidebar showing workspaces, time and date, with
+optional Windows theme, CPU, RAM and battery widgets. Click a workspace to
+switch, or the half-circle to toggle Windows light/dark mode. There are no scroll
+switching, modifier gestures, sidebar context menus or window-moving actions.
 
 Written in C++ using Win32/GDI and the Windows WebSocket client. No browser,
 Python, .NET application runtime, animation loop or persistent CLI helper.
+Validation instructions are in [testing](docs/TESTING.md). There are no additional processes for the widgets.
 
 ## Status
 
@@ -29,7 +31,7 @@ reconnects if the window manager is not ready yet.
 
 The installer backs up the original GlazeWM configuration, removes Zebar/old
 sidebar commands from its startup and shutdown lists, adds an ignore rule for
-the native bar and sets the outer gaps to 40 px left / 8 px top. Other commands,
+the native bar and sets the outer gaps to 52 px left / 8 px top. Other commands,
 keybindings and settings are retained. A running Zebar is stopped at switch-over;
 Zebar itself and its widget settings remain installed.
 
@@ -57,14 +59,50 @@ configuration. `GLAZEWM_CONFIG_PATH` is honored when set.
 - One click switches to that workspace. The focused workspace is highlighted.
 - Workspaces visible on another monitor get a subtler highlight. There are no
   additional occupancy dots.
-- Windows time/date are displayed vertically and update at minute boundaries.
+- Windows time/date sit at the very bottom and update at minute boundaries. Optional widgets are grouped above them.
 - `!` means the connection to GlazeWM is unavailable; reconnect is automatic.
 - Fullscreen windows covering a monitor hide its sidebar.
 - Normal GlazeWM keyboard shortcuts continue to work.
 
 Workspace names are copied to `sidebar.ini` during installation. If you change
 the GlazeWM workspace list later, update that INI file and restart the sidebar.
-A fixed slate-gray palette works with light and dark Windows themes, without a theme switch. Workspace numbers use an 11-pixel font. The hand cursor appears only on workspace buttons; the rest uses the standard arrow.
+The original dark charcoal sidebar palette works with light and dark Windows themes.
+Segoe UI Variable gives workspace labels (12 px) and the stacked clock (16 px) a clear, consistent shape; Windows supplies a font fallback on older systems. The hand cursor appears only on workspace
+buttons and the theme button; the rest uses the standard arrow.
+
+### Optional widgets
+
+The notification-area menu enables each widget independently. All four are on by
+default; selections are saved in the installation's `sidebar.ini` and survive updates.
+
+- **Half-circle:** click to toggle Windows app and system light/dark preferences.
+  The filled half changes sides to reflect the app preference. The sidebar palette
+  stays fixed. Apps with their own theme setting may need to follow the system;
+  a separate theme scheduler may later override a manual change.
+- **CPU:** percentage of busy processor time averaged over the last five seconds.
+  This time-based metric can differ from Task Manager's frequency-adjusted value.
+  On systems with more than 64 logical processors, `GetSystemTimes` covers the
+  calling thread's processor group.
+- **RAM:** percentage of physical memory in use, refreshed every five seconds.
+- **Battery symbol:** battery charge percentage inside the icon, refreshed every minute and on Windows power
+  notifications. `--` means unavailable or no battery; CPU also shows `--` before
+  its first complete sampling interval.
+
+One shared timer samples native Windows APIs for all monitors. Disabled widgets
+are not sampled; disabling CPU, RAM and battery removes the sampling timer. Only
+changed values invalidate the widget area. The theme button has no polling timer.
+No WMI, shell commands, animations or extra worker threads are used for widgets.
+
+```ini
+[widgets]
+theme=1
+cpu=1
+ram=1
+battery=1
+```
+
+Use `0` to disable a widget; restart after manually editing the INI. Changes made
+through the tray menu apply immediately. Metrics are display-only.
 
 All active workspaces are available on each monitor; selection follows GlazeWM's
 normal monitor-assignment behavior. Buttons beyond the available vertical space

@@ -39,7 +39,7 @@ keybindings:
 $changed=ConvertTo-SidebarConfiguration $original
 Assert ($changed.Contains('shell-exec other-app')) 'Other startup command lost'
 Assert (!$changed.Contains('shell-exec zebar')) 'Zebar startup retained'
-Assert ($changed.Contains("left: '40px'")) 'Left gap not applied'
+Assert ($changed.Contains("left: '52px'")) 'Left gap not applied'
 Assert ($changed.Contains("bindings: ['alt+1']")) 'Keybindings changed'
 Assert ((ConvertTo-SidebarConfiguration $changed) -eq $changed) 'Transformation not idempotent'
 $block=$original.Replace("  startup_commands: ['shell-exec zebar', 'shell-exec other-app']","  startup_commands:`n    - 'shell-exec zebar'`n    - 'shell-exec other-app'")
@@ -62,7 +62,10 @@ $shell=New-Object -ComObject WScript.Shell
 $link=$shell.CreateShortcut((Join-Path $startup 'Native Sidebar.lnk'))
 Assert ($link.Arguments.Contains('installed app\Start-Sidebar.ps1"')) 'Shortcut path with spaces broken'
 Assert ((Get-Content (Join-Path $target 'sidebar.ini') -Raw).Contains('workspaces=1,2')) 'Workspace import failed'
+[IO.File]::AppendAllText((Join-Path $target 'sidebar.ini'),"`r`n[widgets]`r`ncpu=0`r`nram=1`r`nbattery=0`r`ntheme=1`r`n")
 & (Join-Path $package 'Install.ps1') @args
+Assert ((Get-Content (Join-Path $target 'sidebar.ini') -Raw).Contains('cpu=0')) 'Update lost disabled CPU preference'
+Assert ((Get-Content (Join-Path $target 'sidebar.ini') -Raw).Contains('battery=0')) 'Update lost disabled battery preference'
 Assert (([IO.File]::ReadAllText((Join-Path $target 'original-config.yaml'))) -eq $original) 'Update overwrote original backup'
 Remove-Item -LiteralPath (Join-Path $startup 'Native Sidebar.lnk')
 & (Join-Path $package 'Install.ps1') @args

@@ -16,8 +16,10 @@
 #include <shellapi.h>
 #include <objbase.h>
 #include "tray.h"
+#include "widgets.h"
 using json = nlohmann::json;
 constexpr UINT UPDATE = WM_APP + 1, REBUILD = WM_APP + 2;
+constexpr int BarWidth = 40, ClockHeight = 112;
 struct Workspace {
   std::string name, label;
   bool focused = false, displayed = false, occupied = false;
@@ -30,7 +32,7 @@ struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
   int dpi = 96, hover = -1;
-  HFONT font = nullptr, smallFont = nullptr;
+  HFONT font = nullptr, smallFont = nullptr, clockFont = nullptr;
 };
 std::vector<Bar *> bars;
 Snapshot currentState, pending;
@@ -206,12 +208,63 @@ int rowAt(Bar *b, int y) {
              ? n
              : -1;
 }
+int widgetHeight() {
+  return (widgets::enabled[widgets::Theme] ? 32 : 0) +
+         34 *
+             (widgets::enabled[widgets::Cpu] + widgets::enabled[widgets::Ram]) +
+         (widgets::enabled[widgets::Battery] ? 32 : 0);
+}
+RECT themeRect(Bar *b) {
+  RECT rc;
+  GetClientRect(b->hwnd, &rc);
+  int top = rc.bottom - px(b, widgetHeight() + ClockHeight);
+  return {px(b, 3), top, rc.right - px(b, 3), top + px(b, 24)};
+}
+bool hitTheme(Bar *b, int x, int y) {
+  auto r = themeRect(b);
+  return widgets::enabled[widgets::Theme] && PtInRect(&r, POINT{x, y});
+}
+void invalidateWidgets() {
+  for (auto *b : bars) {
+    RECT rc;
+    GetClientRect(b->hwnd, &rc);
+    rc.top = std::max(0L, rc.bottom - px(b, widgetHeight() + ClockHeight));
+    rc.bottom -= px(b, ClockHeight);
+    InvalidateRect(b->hwnd, &rc, FALSE);
+  }
+}
+void armWidgets() {
+  KillTimer(controller, 3);
+  if (widgets::enabled[widgets::Cpu] || widgets::enabled[widgets::Ram])
+    SetTimer(controller, 3, 5000, nullptr);
+  else if (widgets::enabled[widgets::Battery])
+    SetTimer(controller, 3, 60000, nullptr);
+}
+void widgetDiagnostics() {
+  if (!diagnostics)
+    return;
+  json j = {{"cpu", widgets::cpu},
+            {"ram", widgets::ram},
+            {"battery", widgets::battery},
+            {"light", widgets::light},
+            {"enabled",
+             {widgets::enabled[0], widgets::enabled[1], widgets::enabled[2],
+              widgets::enabled[3]}},
+            {"timerMs",
+             widgets::enabled[widgets::Cpu] || widgets::enabled[widgets::Ram]
+                 ? 5000
+             : widgets::enabled[widgets::Battery] ? 60000
+                                                  : 0}};
+  std::ofstream f(baseDir + L"widgets.json");
+  f << j.dump(2);
+}
 int hitButton(Bar *b, int x, int y) {
   RECT rc;
   GetClientRect(b->hwnd, &rc);
   int n = rowAt(b, y);
   if (n < 0 || x < px(b, 3) || x >= rc.right - px(b, 3) ||
-      y >= px(b, 32 + n * 28) || px(b, 32 + n * 28) > rc.bottom - px(b, 146))
+      y >= px(b, 32 + n * 28) ||
+      px(b, 32 + n * 28) > rc.bottom - px(b, ClockHeight + 8 + widgetHeight()))
     return -1;
   return n;
 }
@@ -222,24 +275,24 @@ void text(HDC dc, const std::wstring &s, RECT r, COLORREF color, HFONT font) {
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS |
                 DT_NOPREFIX);
 }
-void paint(Bar *b) {
+void paint(Bar *b, HDC target = nullptr) {
   PAINTSTRUCT ps;
-  HDC dc = BeginPaint(b->hwnd, &ps);
+  HDC dc = target ? target : BeginPaint(b->hwnd, &ps);
   RECT rc;
   GetClientRect(b->hwnd, &rc);
-  auto bg = CreateSolidBrush(RGB(66, 73, 84));
+  auto bg = CreateSolidBrush(RGB(23, 26, 32));
   FillRect(dc, &rc, bg);
   DeleteObject(bg);
   SetBkMode(dc, TRANSPARENT);
   for (int i = 0; i < (int)currentState.workspaces.size(); ++i) {
     const auto &w = currentState.workspaces[i];
-    RECT r = {px(b, 3), px(b, 8 + i * 28), rc.right - px(b, 3),
+    RECT r = {px(b, 6), px(b, 8 + i * 28), rc.right - px(b, 6),
               px(b, 32 + i * 28)};
-    if (r.bottom > rc.bottom - px(b, 146))
+    if (r.bottom > rc.bottom - px(b, ClockHeight + 8 + widgetHeight()))
       break;
     if (w.focused || w.displayed || b->hover == i) {
       auto brush =
-          CreateSolidBrush(w.focused ? RGB(114, 137, 164) : RGB(83, 93, 107));
+          CreateSolidBrush(w.focused ? RGB(73, 91, 112) : RGB(43, 49, 59));
       auto old = SelectObject(dc, brush);
       auto pen = SelectObject(dc, GetStockObject(NULL_PEN));
       RoundRect(dc, r.left, r.top, r.right, r.bottom, px(b, 10), px(b, 10));
@@ -248,7 +301,7 @@ void paint(Bar *b) {
       DeleteObject(brush);
     }
     text(dc, wide(w.label), r,
-         w.focused ? RGB(255, 255, 255) : RGB(224, 230, 239), b->font);
+         w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195), b->font);
   }
   if (!currentState.connected) {
     RECT r = {0, px(b, 8), rc.right, px(b, 36)};
@@ -256,22 +309,82 @@ void paint(Bar *b) {
   }
   SYSTEMTIME now;
   GetLocalTime(&now);
-  wchar_t hour[8], minute[8], day[8], month[32], weekday[32];
+  wchar_t hour[8], minute[8], date[16], weekday[32];
   swprintf_s(hour, L"%02u", now.wHour);
   swprintf_s(minute, L"%02u", now.wMinute);
-  swprintf_s(day, L"%02u", now.wDay);
-  GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &now, L"MMM", month, 32,
-                  nullptr);
+  swprintf_s(date, L"%02u.%02u", now.wDay, now.wMonth);
   GetDateFormatEx(LOCALE_NAME_USER_DEFAULT, 0, &now, L"ddd", weekday, 32,
                   nullptr);
-  int y = rc.bottom - px(b, 139);
-  const wchar_t *parts[] = {hour, minute, L"", weekday, day, month};
-  for (int i = 0; i < 6; i++) {
-    RECT r = {0, y + px(b, i * 21), rc.right, y + px(b, (i + 1) * 21)};
-    text(dc, parts[i], r, i < 2 ? RGB(235, 239, 245) : RGB(213, 221, 232),
-         i < 2 ? b->font : b->smallFont);
+  int y = rc.bottom - px(b, 100);
+  RECT hourRect = {0, y, rc.right, y + px(b, 20)};
+  RECT minuteRect = {0, y + px(b, 20), rc.right, y + px(b, 40)};
+  RECT weekdayRect = {0, y + px(b, 51), rc.right, y + px(b, 67)};
+  RECT dateRect = {0, y + px(b, 69), rc.right, y + px(b, 87)};
+  text(dc, hour, hourRect, RGB(235, 239, 245), b->clockFont);
+  text(dc, minute, minuteRect, RGB(235, 239, 245), b->clockFont);
+  text(dc, weekday, weekdayRect, RGB(151, 163, 179), b->smallFont);
+  text(dc, date, dateRect, RGB(185, 195, 209), b->smallFont);
+  RECT divider = {px(b, 12), rc.bottom - px(b, ClockHeight),
+                  rc.right - px(b, 12),
+                  rc.bottom - px(b, ClockHeight) + px(b, 1)};
+  SetDCBrushColor(dc, RGB(43, 49, 59));
+  FillRect(dc, &divider, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+  y = rc.bottom - px(b, widgetHeight() + ClockHeight);
+  if (widgets::enabled[widgets::Theme]) {
+    int cx = rc.right / 2, cy = y + px(b, 12), radius = px(b, 6);
+    auto pen = CreatePen(PS_SOLID, 1, RGB(235, 239, 245));
+    auto oldPen = SelectObject(dc, pen);
+    auto oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    Ellipse(dc, cx - radius, cy - radius, cx + radius + 1, cy + radius + 1);
+    int saved = SaveDC(dc);
+    IntersectClipRect(dc, widgets::light ? cx - radius : cx, cy - radius,
+                      widgets::light ? cx + 1 : cx + radius + 1,
+                      cy + radius + 1);
+    SelectObject(dc, GetStockObject(DC_BRUSH));
+    SetDCBrushColor(dc, RGB(235, 239, 245));
+    Ellipse(dc, cx - radius, cy - radius, cx + radius + 1, cy + radius + 1);
+    RestoreDC(dc, saved);
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+    DeleteObject(pen);
+    y += px(b, 32);
   }
-  EndPaint(b->hwnd, &ps);
+  const wchar_t *labels[] = {L"CPU", L"RAM"};
+  int values[] = {widgets::cpu, widgets::ram};
+  for (int i = 0; i < 2; ++i) {
+    if (!widgets::enabled[i + 1])
+      continue;
+    RECT label = {0, y, rc.right, y + px(b, 14)};
+    RECT value = {0, y + px(b, 14), rc.right, y + px(b, 29)};
+    text(dc, labels[i], label, RGB(151, 163, 179), b->smallFont);
+    text(dc, values[i] < 0 ? L"--" : std::to_wstring(values[i]) + L"%", value,
+         RGB(235, 239, 245), b->smallFont);
+    y += px(b, 34);
+  }
+  if (widgets::enabled[widgets::Battery]) {
+    // Stable light body keeps the percentage legible even at a low charge.
+    RECT body = {px(b, 5), y + px(b, 5), rc.right - px(b, 7), y + px(b, 22)};
+    auto brush = CreateSolidBrush(RGB(210, 221, 230));
+    auto oldBrush = SelectObject(dc, brush);
+    auto oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
+    RoundRect(dc, body.left, body.top, body.right, body.bottom, px(b, 5),
+              px(b, 5));
+    RECT terminal = {body.right + px(b, 1), body.top + px(b, 5),
+                     body.right + px(b, 3), body.bottom - px(b, 5)};
+    FillRect(dc, &terminal, brush);
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+    DeleteObject(brush);
+    auto color = widgets::battery >= 0 && widgets::battery <= 20
+                     ? RGB(145, 38, 43)
+                     : RGB(23, 26, 32);
+    text(dc,
+         widgets::battery < 0 ? L"--"
+                              : std::to_wstring(widgets::battery) + L"%",
+         body, color, b->smallFont);
+  }
+  if (!target)
+    EndPaint(b->hwnd, &ps);
 }
 void armClock(HWND h) {
   SYSTEMTIME t;
@@ -291,6 +404,10 @@ LRESULT CALLBACK barProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
   case WM_PAINT:
     paint(b);
     return 0;
+  case WM_PRINTCLIENT:
+  case WM_PRINT:
+    paint(b, reinterpret_cast<HDC>(w));
+    return 0;
   case WM_ERASEBKGND:
     return 1;
   case WM_MOUSEACTIVATE:
@@ -300,14 +417,23 @@ LRESULT CALLBACK barProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
       POINT p;
       GetCursorPos(&p);
       ScreenToClient(h, &p);
-      SetCursor(LoadCursorW(nullptr, currentState.connected &&
-                                             hitButton(b, p.x, p.y) >= 0
+      SetCursor(LoadCursorW(nullptr, hitTheme(b, p.x, p.y) ||
+                                             (currentState.connected &&
+                                              hitButton(b, p.x, p.y) >= 0)
                                          ? IDC_HAND
                                          : IDC_ARROW));
       return TRUE;
     }
     break;
   case WM_LBUTTONUP: {
+    if (hitTheme(b, GET_X_LPARAM(l), GET_Y_LPARAM(l))) {
+      if (!widgets::toggleTheme())
+        MessageBoxW(controller,
+                    L"Das Windows-Farbschema konnte nicht geaendert werden.",
+                    L"Native Sidebar", MB_OK | MB_ICONERROR);
+      invalidateWidgets();
+      return 0;
+    }
     int i = hitButton(b, GET_X_LPARAM(l), GET_Y_LPARAM(l));
     if (i >= 0)
       focusWorkspace(currentState.workspaces[i].name);
@@ -348,19 +474,23 @@ BOOL CALLBACK addMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM) {
   b->hwnd =
       CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"NativeSidebar",
                       L"Native Sidebar", WS_POPUP, mi.rcWork.left,
-                      mi.rcWork.top, 28, mi.rcWork.bottom - mi.rcWork.top,
+                      mi.rcWork.top, BarWidth, mi.rcWork.bottom - mi.rcWork.top,
                       nullptr, nullptr, GetModuleHandleW(nullptr), b);
   b->dpi = GetDpiForWindow(b->hwnd);
   b->font =
-      CreateFontW(-px(b, 11), 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
+      CreateFontW(-px(b, 12), 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE,
                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
   b->smallFont =
       CreateFontW(-px(b, 10), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                   DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+                  CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI Variable Text");
+  b->clockFont = CreateFontW(-px(b, 16), 0, 0, 0, FW_MEDIUM, FALSE, FALSE,
+                             FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                             CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                             DEFAULT_PITCH, L"Segoe UI Variable Display");
   SetWindowPos(b->hwnd, HWND_TOPMOST, mi.rcWork.left + px(b, 4),
-               mi.rcWork.top + px(b, 4), px(b, 28),
+               mi.rcWork.top + px(b, 4), px(b, BarWidth),
                mi.rcWork.bottom - mi.rcWork.top - px(b, 8),
                SWP_NOACTIVATE | SWP_SHOWWINDOW);
   bars.push_back(b);
@@ -371,6 +501,7 @@ void rebuild() {
     DestroyWindow(b->hwnd);
     DeleteObject(b->font);
     DeleteObject(b->smallFont);
+    DeleteObject(b->clockFont);
     delete b;
   }
   bars.clear();
@@ -411,7 +542,17 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
       tray::menu();
     return 0;
   case WM_COMMAND:
-    if (LOWORD(w) == tray::Exit)
+    if (LOWORD(w) >= 4110 && LOWORD(w) < 4110 + widgets::Count) {
+      if (!widgets::toggle(LOWORD(w) - 4110))
+        MessageBoxW(h,
+                    L"Die Widget-Einstellung konnte nicht gespeichert werden.",
+                    L"Native Sidebar", MB_OK | MB_ICONERROR);
+      widgets::sample();
+      armWidgets();
+      widgetDiagnostics();
+      for (auto *b : bars)
+        InvalidateRect(b->hwnd, nullptr, FALSE);
+    } else if (LOWORD(w) == tray::Exit)
       PostMessageW(h, WM_CLOSE, 0, 0);
     else if (LOWORD(w) == tray::Show) {
       rebuild();
@@ -455,6 +596,12 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     SetTimer(h, 2, 100, nullptr);
     return 0;
   case WM_TIMER:
+    if (w == 3) {
+      if (widgets::sample())
+        invalidateWidgets();
+      widgetDiagnostics();
+      return 0;
+    }
     if (w == 2) {
       KillTimer(h, 2);
       fullscreenVisibility();
@@ -470,9 +617,20 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     armClock(h);
     return 0;
   case WM_SETTINGCHANGE:
+    widgets::refreshTheme();
+    if (w != SPI_SETWORKAREA) {
+      invalidateWidgets();
+      return 0;
+    }
+    [[fallthrough]];
   case REBUILD:
     rebuild();
+    fullscreenVisibility();
     return 0;
+  case WM_POWERBROADCAST:
+    if (widgets::sample(true))
+      invalidateWidgets();
+    return TRUE;
   case WM_CLOSE:
     stopping = true;
     tray::remove();
@@ -487,6 +645,14 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
   return DefWindowProcW(h, msg, w, l);
 }
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
+  if (wcsstr(args, L"--test-cpu"))
+    return widgets::cpuPercent(50, 70, 30) == 50 &&
+                   widgets::cpuPercent(100, 100, 0) == 0 &&
+                   widgets::cpuPercent(0, 50, 50) == 100 &&
+                   widgets::cpuPercent(0, 0, 0) == -1 &&
+                   widgets::cpuPercent(101, 100, 0) == -1
+               ? 0
+               : 1;
   if (wcsstr(args, L"--test-workspaces")) {
     configured = {"1", "2", "3", "9"};
     const auto result = decode(json::parse(R"({"data":{"workspaces":[
@@ -512,6 +678,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
   baseDir = baseDir.substr(0, baseDir.find_last_of(L"\\/") + 1);
   diagnostics = wcsstr(args, L"--diagnostics") != nullptr;
   loadConfig();
+  widgets::load(baseDir + L"sidebar.ini");
+  widgets::sample();
   WNDCLASSW wc = {};
   wc.hInstance = instance;
   wc.lpfnWndProc = barProc;
@@ -529,6 +697,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
   tray::initialize(controller, baseDir);
   rebuild();
   armClock(controller);
+  armWidgets();
   SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
                   foregroundEvent, 0, 0,
                   WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);

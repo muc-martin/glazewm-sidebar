@@ -2,6 +2,7 @@
 #define _UNICODE
 #define WIN32_LEAN_AND_MEAN
 #include "tray.h"
+#include "widgets.h"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -139,6 +140,13 @@ void menu() {
   AppendMenuW(popup, MF_STRING, Show, L"Sidebar anzeigen");
   AppendMenuW(popup, MF_STRING | (startupEnabled() ? MF_CHECKED : MF_UNCHECKED),
               Startup, L"Mit Windows starten");
+  AppendMenuW(popup, MF_SEPARATOR, 0, nullptr);
+  const wchar_t *labels[] = {L"Widget: Hell/Dunkel", L"Widget: CPU",
+                             L"Widget: RAM", L"Widget: Akku"};
+  for (int i = 0; i < widgets::Count; ++i)
+    AppendMenuW(popup,
+                MF_STRING | (widgets::enabled[i] ? MF_CHECKED : MF_UNCHECKED),
+                4110 + i, labels[i]);
   AppendMenuW(popup, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(popup, MF_STRING, Exit, L"Beenden");
   POINT point;

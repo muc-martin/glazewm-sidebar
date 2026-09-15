@@ -2,7 +2,12 @@
 
 ## 0.1.0 — unreleased
 
-- Native 28-pixel sidebar with smaller text and a fixed, lighter slate palette.
+- Clock/date anchored at the bottom; battery percentage inside a compact battery icon.
+- Optional half-circle Windows theme toggle and CPU/RAM/battery percentages.
+- Native five-second CPU/RAM sampling, minute/power-event battery updates;
+  no sampling timer when metrics are disabled, no additional processes.
+- Individual widget settings in the tray menu, preserved on restart and upgrade.
+- Native 40-pixel sidebar with the original charcoal/blue palette and Segoe UI Variable.
 - Single-click workspace switching; only occupied/current workspaces are shown.
 - Removed occupancy dots; hand cursor only over clickable workspace buttons.
 - Notification-area icon with startup toggle and exit; Start menu launcher.
