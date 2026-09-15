@@ -13,11 +13,12 @@ optional CPU, RAM, battery and Windows theme controls above them.
 Requires Windows x64 and GlazeWM.
 
 1. Install GlazeWM and run it once to create its configuration.
-2. Open the latest successful [Windows build](https://github.com/muc-martin/glazewm-sidebar/actions/workflows/build.yml)
-   and download **native-sidebar-windows-x64** under **Artifacts**. GitHub requires
-   you to sign in to download build artifacts.
-3. Extract the artifact, then extract `native-sidebar-0.1.0-windows-x64.zip` inside it.
-4. Run **Install.cmd**. No administrator rights are needed.
+2. Download the installer ZIP from the [latest release](https://github.com/muc-martin/glazewm-sidebar/releases/latest).
+3. Extract `native-sidebar-0.1.0-windows-x64.zip` and run **Install.cmd**.
+   No administrator rights are needed.
+
+The release also includes `native-sidebar.exe` for manual setups. The standalone
+EXE runs the bar; use the installer ZIP for GlazeWM configuration and autostart.
 
 The installer starts the sidebar and adds it to the Start menu, Windows Startup
 and **Settings > Apps > Installed apps**. Files are installed in
