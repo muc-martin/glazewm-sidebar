@@ -88,7 +88,8 @@ try {
     if($enableStartup){$link.Save()}
     New-Item -ItemType Directory -Path $StartMenuDirectory -Force | Out-Null
     $menuLink=$shell.CreateShortcut($startMenuShortcut)
-    $menuLink.TargetPath=$link.TargetPath;$menuLink.Arguments=$link.Arguments
+    $menuLink.TargetPath=Join-Path $InstallDirectory 'native-sidebar.exe'
+    $menuLink.Arguments=''
     $menuLink.WorkingDirectory=$InstallDirectory;$menuLink.WindowStyle=7
     $menuLink.IconLocation=(Join-Path $InstallDirectory 'native-sidebar.exe')+',0'
     $menuLink.Description='Native Sidebar starten';$menuLink.Save()

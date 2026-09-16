@@ -68,6 +68,10 @@ Assert ($registered.NoModify -eq 1 -and $registered.NoRepair -eq 1) 'Unsupported
 $shell=New-Object -ComObject WScript.Shell
 $link=$shell.CreateShortcut((Join-Path $startup 'Native Sidebar.lnk'))
 Assert ($link.Arguments.Contains('installed app\Start-Sidebar.ps1"')) 'Shortcut path with spaces broken'
+$menuLink=$shell.CreateShortcut((Join-Path $startMenu 'Native Sidebar.lnk'))
+Assert ($menuLink.TargetPath -eq (Join-Path $target 'native-sidebar.exe')) 'Start menu must target the app executable for Windows discovery'
+Assert ([string]::IsNullOrEmpty($menuLink.Arguments)) 'Start menu retains script launcher arguments'
+
 Assert ((Get-Content (Join-Path $target 'sidebar.ini') -Raw).Contains('workspaces=1,2')) 'Workspace import failed'
 [IO.File]::AppendAllText((Join-Path $target 'sidebar.ini'),"`r`n[widgets]`r`ncpu=0`r`nram=1`r`nbattery=0`r`ntheme=1`r`n")
 & (Join-Path $package 'Install.ps1') @args
