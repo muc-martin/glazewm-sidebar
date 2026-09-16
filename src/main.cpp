@@ -32,6 +32,8 @@ struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
   HBITMAP moon = nullptr;
+  HBITMAP selection = nullptr;
+  int selectionSize = 0;
   HBITMAP batteryImage = nullptr;
   int drawnBattery = -2;
   bool drawnPluggedIn = false;
@@ -51,6 +53,32 @@ std::vector<std::string> configured;
 bool diagnostics = false;
 UINT taskbarCreated = 0;
 int px(Bar *b, int v) { return MulDiv(v, b->dpi, 96); }
+HBITMAP selectionBitmap(int size) {
+  BITMAPINFO info{};
+  info.bmiHeader = {sizeof(BITMAPINFOHEADER), size, -size, 1, 32, BI_RGB};
+  DWORD *pixels = nullptr;
+  auto bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS,
+                                reinterpret_cast<void **>(&pixels), nullptr, 0);
+  if (!bitmap)
+    return nullptr;
+  const double radius = size / 2.0;
+  for (int y = 0; y < size; ++y)
+    for (int x = 0; x < size; ++x) {
+      int covered = 0;
+      for (int sy = 0; sy < 8; ++sy)
+        for (int sx = 0; sx < 8; ++sx) {
+          const double dx = x + (sx + 0.5) / 8 - radius;
+          const double dy = y + (sy + 0.5) / 8 - radius;
+          if (dx * dx + dy * dy <= radius * radius)
+            ++covered;
+        }
+      const int red = 23 + (73 - 23) * covered / 64;
+      const int green = 26 + (91 - 26) * covered / 64;
+      const int blue = 32 + (112 - 32) * covered / 64;
+      pixels[y * size + x] = (red << 16) | (green << 8) | blue;
+    }
+  return bitmap;
+}
 HBITMAP moonBitmap(int size) {
   BITMAPINFO info{};
   info.bmiHeader = {sizeof(BITMAPINFOHEADER), size, -size, 1, 32, BI_RGB};
@@ -443,7 +471,20 @@ void paint(Bar *b, HDC target = nullptr) {
         const int diameter = std::min(r.right - r.left, r.bottom - r.top);
         const int left = (r.left + r.right - diameter) / 2;
         const int top = (r.top + r.bottom - diameter) / 2;
-        Ellipse(dc, left, top, left + diameter, top + diameter);
+        if (!b->selection || b->selectionSize != diameter) {
+          DeleteObject(b->selection);
+          b->selection = selectionBitmap(diameter);
+          b->selectionSize = diameter;
+        }
+        if (b->selection) {
+          auto source = CreateCompatibleDC(dc);
+          auto previous = SelectObject(source, b->selection);
+          BitBlt(dc, left, top, diameter, diameter, source, 0, 0, SRCCOPY);
+          SelectObject(source, previous);
+          DeleteDC(source);
+        } else {
+          Ellipse(dc, left, top, left + diameter, top + diameter);
+        }
       } else {
         RoundRect(dc, r.left, r.top, r.right, r.bottom, px(b, 10), px(b, 10));
       }
@@ -688,6 +729,7 @@ void rebuild() {
     DeleteObject(b->clockFont);
     DeleteObject(b->batteryFont);
     DeleteObject(b->moon);
+    DeleteObject(b->selection);
     DeleteObject(b->batteryImage);
     DeleteObject(b->activeFont);
     delete b;
