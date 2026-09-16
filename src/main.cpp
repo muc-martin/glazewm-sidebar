@@ -32,8 +32,8 @@ struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
   HBITMAP moon = nullptr;
-  HBITMAP selection = nullptr;
-  int selectionSize = 0;
+  HBITMAP selection = nullptr, hoverSelection = nullptr;
+  int selectionSize = 0, hoverSelectionSize = 0;
   HBITMAP batteryImage = nullptr;
   int drawnBattery = -2;
   bool drawnPluggedIn = false;
@@ -53,7 +53,7 @@ std::vector<std::string> configured;
 bool diagnostics = false;
 UINT taskbarCreated = 0;
 int px(Bar *b, int v) { return MulDiv(v, b->dpi, 96); }
-HBITMAP selectionBitmap(int size) {
+HBITMAP selectionBitmap(int size, COLORREF color) {
   BITMAPINFO info{};
   info.bmiHeader = {sizeof(BITMAPINFOHEADER), size, -size, 1, 32, BI_RGB};
   DWORD *pixels = nullptr;
@@ -72,9 +72,9 @@ HBITMAP selectionBitmap(int size) {
           if (dx * dx + dy * dy <= radius * radius)
             ++covered;
         }
-      const int red = 23 + (73 - 23) * covered / 64;
-      const int green = 26 + (91 - 26) * covered / 64;
-      const int blue = 32 + (112 - 32) * covered / 64;
+      const int red = 23 + (GetRValue(color) - 23) * covered / 64;
+      const int green = 26 + (GetGValue(color) - 26) * covered / 64;
+      const int blue = 32 + (GetBValue(color) - 32) * covered / 64;
       pixels[y * size + x] = (red << 16) | (green << 8) | blue;
     }
   return bitmap;
@@ -463,34 +463,32 @@ void paint(Bar *b, HDC target = nullptr) {
     if (r.bottom > rc.bottom - px(b, ClockHeight + 8 + widgetHeight()))
       break;
     if (w.focused || w.displayed || b->hover == i) {
-      auto brush =
-          CreateSolidBrush(w.focused ? RGB(73, 91, 112) : RGB(43, 49, 59));
-      auto old = SelectObject(dc, brush);
-      auto pen = SelectObject(dc, GetStockObject(NULL_PEN));
-      if (w.focused) {
-        const int diameter = std::min(r.right - r.left, r.bottom - r.top);
-        const int left = (r.left + r.right - diameter) / 2;
-        const int top = (r.top + r.bottom - diameter) / 2;
-        if (!b->selection || b->selectionSize != diameter) {
-          DeleteObject(b->selection);
-          b->selection = selectionBitmap(diameter);
-          b->selectionSize = diameter;
-        }
-        if (b->selection) {
-          auto source = CreateCompatibleDC(dc);
-          auto previous = SelectObject(source, b->selection);
-          BitBlt(dc, left, top, diameter, diameter, source, 0, 0, SRCCOPY);
-          SelectObject(source, previous);
-          DeleteDC(source);
-        } else {
-          Ellipse(dc, left, top, left + diameter, top + diameter);
-        }
-      } else {
-        RoundRect(dc, r.left, r.top, r.right, r.bottom, px(b, 10), px(b, 10));
+      const auto color = w.focused ? RGB(73, 91, 112) : RGB(43, 49, 59);
+      const int diameter = std::min(r.right - r.left, r.bottom - r.top);
+      const int left = (r.left + r.right - diameter) / 2;
+      const int top = (r.top + r.bottom - diameter) / 2;
+      auto &bitmap = w.focused ? b->selection : b->hoverSelection;
+      auto &size = w.focused ? b->selectionSize : b->hoverSelectionSize;
+      if (!bitmap || size != diameter) {
+        DeleteObject(bitmap);
+        bitmap = selectionBitmap(diameter, color);
+        size = diameter;
       }
-      SelectObject(dc, pen);
-      SelectObject(dc, old);
-      DeleteObject(brush);
+      if (bitmap) {
+        auto source = CreateCompatibleDC(dc);
+        auto previous = SelectObject(source, bitmap);
+        BitBlt(dc, left, top, diameter, diameter, source, 0, 0, SRCCOPY);
+        SelectObject(source, previous);
+        DeleteDC(source);
+      } else {
+        auto brush = CreateSolidBrush(color);
+        auto old = SelectObject(dc, brush);
+        auto pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        Ellipse(dc, left, top, left + diameter, top + diameter);
+        SelectObject(dc, pen);
+        SelectObject(dc, old);
+        DeleteObject(brush);
+      }
     }
     auto label = wide(w.label);
     auto color = w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195);
@@ -730,6 +728,7 @@ void rebuild() {
     DeleteObject(b->batteryFont);
     DeleteObject(b->moon);
     DeleteObject(b->selection);
+    DeleteObject(b->hoverSelection);
     DeleteObject(b->batteryImage);
     DeleteObject(b->activeFont);
     delete b;
