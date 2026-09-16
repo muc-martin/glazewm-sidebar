@@ -439,7 +439,14 @@ void paint(Bar *b, HDC target = nullptr) {
           CreateSolidBrush(w.focused ? RGB(73, 91, 112) : RGB(43, 49, 59));
       auto old = SelectObject(dc, brush);
       auto pen = SelectObject(dc, GetStockObject(NULL_PEN));
-      RoundRect(dc, r.left, r.top, r.right, r.bottom, px(b, 10), px(b, 10));
+      if (w.focused) {
+        const int diameter = std::min(r.right - r.left, r.bottom - r.top);
+        const int left = (r.left + r.right - diameter) / 2;
+        const int top = (r.top + r.bottom - diameter) / 2;
+        Ellipse(dc, left, top, left + diameter, top + diameter);
+      } else {
+        RoundRect(dc, r.left, r.top, r.right, r.bottom, px(b, 10), px(b, 10));
+      }
       SelectObject(dc, pen);
       SelectObject(dc, old);
       DeleteObject(brush);
