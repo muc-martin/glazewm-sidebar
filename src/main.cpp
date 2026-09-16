@@ -464,7 +464,7 @@ void paint(Bar *b, HDC target = nullptr) {
       break;
     if (w.focused || w.displayed || b->hover == i) {
       const auto color = w.focused ? RGB(73, 91, 112) : RGB(43, 49, 59);
-      const int diameter = std::min(r.right - r.left, r.bottom - r.top);
+      const int diameter = std::min(px(b, 20), static_cast<int>(std::min(r.right - r.left, r.bottom - r.top)));
       const int left = (r.left + r.right - diameter) / 2;
       const int top = (r.top + r.bottom - diameter) / 2;
       auto &bitmap = w.focused ? b->selection : b->hoverSelection;
