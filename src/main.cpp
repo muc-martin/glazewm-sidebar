@@ -22,6 +22,7 @@ constexpr UINT UPDATE = WM_APP + 1, REBUILD = WM_APP + 2;
 constexpr int BarWidth = 40, ClockHeight = 112;
 struct Workspace {
   std::string name, label;
+  uint64_t monitor = 0;
   bool focused = false, displayed = false, occupied = false;
 };
 struct Snapshot {
@@ -31,6 +32,7 @@ struct Snapshot {
 struct Bar {
   HWND hwnd = nullptr, tip = nullptr;
   HMONITOR monitor = nullptr;
+  std::vector<int> workspaceIndices;
   HBITMAP moon = nullptr;
   HBITMAP selection = nullptr, hoverSelection = nullptr;
   int selectionSize = 0, hoverSelectionSize = 0;
@@ -224,17 +226,23 @@ void publish(Snapshot s) {
 Snapshot decode(const json &j) {
   Snapshot s;
   s.connected = true;
-  for (const auto &w : j.at("data").at("workspaces")) {
-    Workspace v;
-    v.name = w.at("name").get<std::string>();
-    v.label = w.value("displayName", json()).is_string()
-                  ? w["displayName"].get<std::string>()
-                  : v.name;
-    v.focused = w.value("hasFocus", false);
-    v.displayed = w.value("isDisplayed", false);
-    v.occupied = !w.value("children", json::array()).empty();
-    if (v.occupied || v.focused || v.displayed)
-      s.workspaces.push_back(v);
+  for (const auto &monitor : j.at("data").at("monitors")) {
+    const auto handle = monitor.at("handle").get<uint64_t>();
+    for (const auto &w : monitor.at("children")) {
+      if (w.value("type", "") != "workspace")
+        continue;
+      Workspace v;
+      v.monitor = handle;
+      v.name = w.at("name").get<std::string>();
+      v.label = w.value("displayName", json()).is_string()
+                    ? w["displayName"].get<std::string>()
+                    : v.name;
+      v.focused = w.value("hasFocus", false);
+      v.displayed = w.value("isDisplayed", false);
+      v.occupied = !w.value("children", json::array()).empty();
+      if (v.occupied || v.focused || v.displayed)
+        s.workspaces.push_back(v);
+    }
   }
   return s;
 }
@@ -269,7 +277,7 @@ void connectionLoop() {
           "workspace_activated workspace_deactivated workspace_updated "
           "window_managed window_unmanaged monitor_added monitor_removed "
           "monitor_updated user_config_changed pause_changed");
-      sendCommand("query workspaces");
+      sendCommand("query monitors");
       bool outstanding = true, dirty = false;
       std::string message;
       char buf[16384];
@@ -294,18 +302,18 @@ void connectionLoop() {
             }
           }
           if (j.contains("data") && j["data"].is_object() &&
-              j["data"].contains("workspaces")) {
+              j["data"].contains("monitors")) {
             publish(decode(j));
             outstanding = false;
             if (dirty) {
               dirty = false;
-              outstanding = sendCommand("query workspaces");
+              outstanding = sendCommand("query monitors");
             }
           } else if (j.value("messageType", "") == "event_subscription") {
             if (outstanding)
               dirty = true;
             else
-              outstanding = sendCommand("query workspaces");
+              outstanding = sendCommand("query monitors");
           }
         } catch (const std::exception &) {
         }
@@ -331,9 +339,17 @@ void focusWorkspace(const std::string &name) {
     return;
   sendCommand("command focus --workspace " + name);
 }
+void updateWorkspaceIndices(Bar *b) {
+  b->workspaceIndices.clear();
+  const auto monitor = reinterpret_cast<uintptr_t>(b->monitor);
+  for (int i = 0; i < static_cast<int>(currentState.workspaces.size()); ++i)
+    if (currentState.workspaces[i].monitor == monitor)
+      b->workspaceIndices.push_back(i);
+  b->hover = -1;
+}
 int rowAt(Bar *b, int y) {
   int n = (y - px(b, 8)) / px(b, 28);
-  return y >= px(b, 8) && n >= 0 && n < (int)currentState.workspaces.size()
+  return y >= px(b, 8) && n >= 0 && n < (int)b->workspaceIndices.size()
              ? n
              : -1;
 }
@@ -396,7 +412,7 @@ int hitButton(Bar *b, int x, int y) {
       y >= px(b, 32 + n * 28) ||
       px(b, 32 + n * 28) > rc.bottom - px(b, ClockHeight + 8 + widgetHeight()))
     return -1;
-  return n;
+  return b->workspaceIndices[n];
 }
 void text(HDC dc, const std::wstring &s, RECT r, COLORREF color, HFONT font) {
   SelectObject(dc, font);
@@ -456,19 +472,21 @@ void paint(Bar *b, HDC target = nullptr) {
   FillRect(dc, &rc, bg);
   DeleteObject(bg);
   SetBkMode(dc, TRANSPARENT);
-  for (int i = 0; i < (int)currentState.workspaces.size(); ++i) {
+  for (int row = 0; row < (int)b->workspaceIndices.size(); ++row) {
+    const int i = b->workspaceIndices[row];
     const auto &w = currentState.workspaces[i];
-    RECT r = {px(b, 6), px(b, 8 + i * 28), rc.right - px(b, 6),
-              px(b, 32 + i * 28)};
+    const bool selected = w.displayed || w.focused;
+    RECT r = {px(b, 6), px(b, 8 + row * 28), rc.right - px(b, 6),
+              px(b, 32 + row * 28)};
     if (r.bottom > rc.bottom - px(b, ClockHeight + 8 + widgetHeight()))
       break;
-    if (w.focused || w.displayed || b->hover == i) {
-      const auto color = w.focused ? RGB(73, 91, 112) : RGB(43, 49, 59);
+    if (selected || b->hover == i) {
+      const auto color = selected ? RGB(73, 91, 112) : RGB(43, 49, 59);
       const int diameter = std::min(px(b, 20), static_cast<int>(std::min(r.right - r.left, r.bottom - r.top)));
       const int left = (r.left + r.right - diameter) / 2;
       const int top = (r.top + r.bottom - diameter) / 2;
-      auto &bitmap = w.focused ? b->selection : b->hoverSelection;
-      auto &size = w.focused ? b->selectionSize : b->hoverSelectionSize;
+      auto &bitmap = selected ? b->selection : b->hoverSelection;
+      auto &size = selected ? b->selectionSize : b->hoverSelectionSize;
       if (!bitmap || size != diameter) {
         DeleteObject(bitmap);
         bitmap = selectionBitmap(diameter, color);
@@ -491,8 +509,8 @@ void paint(Bar *b, HDC target = nullptr) {
       }
     }
     auto label = wide(w.label);
-    auto color = w.focused ? RGB(255, 255, 255) : RGB(173, 183, 195);
-    centeredNumber(dc, label, r, color, w.focused ? b->activeFont : b->font);
+    auto color = selected ? RGB(255, 255, 255) : RGB(173, 183, 195);
+    centeredNumber(dc, label, r, color, selected ? b->activeFont : b->font);
   }
   if (!currentState.connected) {
     RECT r = {0, px(b, 8), rc.right, px(b, 36)};
@@ -684,6 +702,7 @@ LRESULT CALLBACK barProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
 BOOL CALLBACK addMonitor(HMONITOR monitor, HDC, LPRECT, LPARAM) {
   auto *b = new Bar;
   b->monitor = monitor;
+  updateWorkspaceIndices(b);
   MONITORINFO mi = {sizeof(mi)};
   GetMonitorInfoW(monitor, &mi);
   b->hwnd =
@@ -806,8 +825,10 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                ib = std::find(configured.begin(), configured.end(), b.name);
           return ia < ib;
         });
-    for (auto *b : bars)
+    for (auto *b : bars) {
+      updateWorkspaceIndices(b);
       InvalidateRect(b->hwnd, nullptr, FALSE);
+    }
     if (diagnostics) {
       json j;
       j["connected"] = currentState.connected;
@@ -815,7 +836,15 @@ LRESULT CALLBACK controlProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
       for (auto &a : currentState.workspaces)
         j["workspaces"].push_back({{"name", a.name},
                                    {"focused", a.focused},
-                                   {"occupied", a.occupied}});
+                                   {"occupied", a.occupied},
+                                   {"monitor", a.monitor}});
+      j["bars"] = json::array();
+      for (auto *b : bars) {
+        json names = json::array();
+        for (int index : b->workspaceIndices)
+          names.push_back(currentState.workspaces[index].name);
+        j["bars"].push_back({{"monitor", reinterpret_cast<uintptr_t>(b->monitor)}, {"workspaces", names}});
+      }
       std::ofstream f(baseDir + L"state.json");
       f << j.dump(2);
     }
@@ -883,18 +912,38 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR args, int) {
                ? 0
                : 1;
   if (wcsstr(args, L"--test-workspaces")) {
-    configured = {"1", "2", "3", "9"};
-    const auto result = decode(json::parse(R"({"data":{"workspaces":[
-      {"name":"1","children":[{"type":"window"}]},
-      {"name":"2","children":[],"hasFocus":true},
-      {"name":"3","children":[],"isDisplayed":true},
-      {"name":"4","children":[]}
+    const auto result = decode(json::parse(R"({"data":{"monitors":[
+      {"handle":101,"children":[
+        {"type":"workspace","name":"1","children":[{"type":"window"}]},
+        {"type":"workspace","name":"2","children":[],"isDisplayed":true},
+        {"type":"workspace","name":"9","children":[]}]},
+      {"handle":202,"children":[
+        {"type":"workspace","name":"3","children":[],"hasFocus":true,"isDisplayed":true},
+        {"type":"workspace","name":"4","children":[{"type":"window"}]}]}
     ]}})"));
-    return result.workspaces.size() == 3 && result.workspaces[0].name == "1" &&
-                   result.workspaces[1].name == "2" &&
-                   result.workspaces[2].name == "3"
-               ? 0
-               : 1;
+    currentState = result;
+    Bar left, right;
+    left.monitor = reinterpret_cast<HMONITOR>(101);
+    right.monitor = reinterpret_cast<HMONITOR>(202);
+    updateWorkspaceIndices(&left);
+    updateWorkspaceIndices(&right);
+    if (result.workspaces.size() != 4 ||
+        left.workspaceIndices != std::vector<int>({0, 1}) ||
+        right.workspaceIndices != std::vector<int>({2, 3}) ||
+        rowAt(&right, 20) != 0 || rowAt(&right, 48) != 1 ||
+        rowAt(&right, 76) != -1)
+      return 1;
+    // Moving a workspace must update both monitor lists, including click indices.
+    currentState.workspaces[0].monitor = 202;
+    updateWorkspaceIndices(&left);
+    updateWorkspaceIndices(&right);
+    if (left.workspaceIndices != std::vector<int>({1}) ||
+        right.workspaceIndices != std::vector<int>({0, 2, 3}))
+      return 1;
+    currentState = Snapshot{};
+    updateWorkspaceIndices(&left);
+    updateWorkspaceIndices(&right);
+    return left.workspaceIndices.empty() && right.workspaceIndices.empty() ? 0 : 1;
   }
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);

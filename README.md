@@ -85,9 +85,10 @@ underscores, periods and hyphens.
 
 ## Workspaces
 
-The 40-pixel bar appears on the left of each monitor. It shows occupied workspaces
-and those currently displayed on a monitor. The focused workspace is bold and
-highlighted; workspaces displayed on other monitors have a subtler highlight.
+The 40-pixel bar appears on the left of each monitor and shows only that monitor's
+occupied workspaces and currently displayed workspace. The displayed workspace
+is bold and highlighted on each screen. Workspace lists update when a workspace
+moves between monitors.
 
 A click switches to that workspace. Fullscreen windows hide the bar. If the
 connection to GlazeWM drops, the bar shows `!` and reconnects automatically.
